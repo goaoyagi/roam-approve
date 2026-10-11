@@ -1,0 +1,67 @@
+import json
+from types import SimpleNamespace
+from unittest.mock import MagicMock
+from uuid import uuid4
+
+from paho.mqtt import client as mqtt
+from roam_approve_bridge.models import ApprovalRequest
+from roam_approve_bridge.notifier.base import REQUEST_TOPIC, RESOLVED_TOPIC
+from roam_approve_bridge.notifier.mqtt import MqttNotifier
+
+
+def approval_request():
+    return ApprovalRequest(
+        id=uuid4(),
+        agent="devin-cli",
+        session_id="session-1",
+        title="Run command",
+        lines=["make test"],
+        timeout_s=300,
+    )
+
+
+def test_mqtt_notifier_lifecycle_and_payloads(monkeypatch):
+    client = MagicMock()
+    client.publish.return_value = SimpleNamespace(rc=mqtt.MQTT_ERR_SUCCESS)
+    client_factory = MagicMock(return_value=client)
+    monkeypatch.setattr("roam_approve_bridge.notifier.mqtt.mqtt.Client", client_factory)
+
+    notifier = MqttNotifier("mqtt-host", 1883)
+    request = approval_request()
+    notifier.start()
+    notifier.publish_request(request)
+    notifier.publish_resolved(request)
+    notifier.close()
+
+    client_factory.assert_called_once_with(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2
+    )
+    client.connect_async.assert_called_once_with("mqtt-host", 1883)
+    client.loop_start.assert_called_once_with()
+    request_messages = client.publish.call_args_list
+    assert request_messages[0].args[0] == REQUEST_TOPIC
+    assert json.loads(request_messages[0].args[1]) == {
+        "id": str(request.id),
+        "agent": request.agent,
+        "title": request.title,
+        "lines": request.lines,
+        "expires_at": request.expires_at.isoformat(),
+    }
+    assert client.publish.call_args_list[0].kwargs == {
+        "qos": 1,
+        "retain": True,
+    }
+    assert client.publish.call_args_list[1].args == (REQUEST_TOPIC, b"")
+    assert client.publish.call_args_list[1].kwargs == {
+        "qos": 1,
+        "retain": True,
+    }
+    resolved = json.loads(client.publish.call_args_list[2].args[1])
+    assert resolved == {"id": str(request.id), "status": "pending"}
+    assert client.publish.call_args_list[2].args[0] == RESOLVED_TOPIC
+    assert client.publish.call_args_list[2].kwargs == {
+        "qos": 1,
+        "retain": False,
+    }
+    client.loop_stop.assert_called_once_with()
+    client.disconnect.assert_called_once_with()

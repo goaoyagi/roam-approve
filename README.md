@@ -54,7 +54,7 @@ cd device/firmware && pio run -e m5stickc-plus-se -t upload
 | Step | 内容 | 状態 |
 |---|---|---|
 | 1 | スキャフォールド + セキュリティ設定 + CI | 完了 |
-| 2 | Bridge 実装 + pytest | 未着手 (Issue 参照) |
+| 2 | Bridge 実装 + pytest | 完了 |
 | 3 | Adapters(devin-cli) + hooks 設定例 | 未着手 (Issue 参照) |
 | 4 | Firmware(ApprovalApp + native テスト + M5 HAL) | 未着手 (Issue 参照) |
 | 5 | フェイクデバイス + E2E | 未着手 (Issue 参照) |

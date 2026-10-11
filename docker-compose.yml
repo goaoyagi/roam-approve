@@ -7,11 +7,16 @@ services:
       - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
 
   bridge:
-    # infra/bridge.Dockerfile is not created yet; enable with `docker compose --profile bridge up`
     profiles: ["bridge"]
     build:
       context: host
       dockerfile: ../infra/bridge.Dockerfile
-    env_file: .env
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ROAM_MQTT_HOST: mosquitto
+    ports:
+      - "${ROAM_BIND:-127.0.0.1}:${ROAM_PORT:-8000}:8000"
     depends_on:
       - mosquitto
