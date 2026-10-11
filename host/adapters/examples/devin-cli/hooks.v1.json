@@ -1,0 +1,14 @@
+{
+  "PermissionRequest": [
+    {
+      "matcher": "^(exec|write|edit)$",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "roam-approve-hook devin-cli",
+          "timeout": 300
+        }
+      ]
+    }
+  ]
+}

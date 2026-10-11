@@ -1,0 +1,11 @@
+{
+  "folders": [
+    { "path": ".", "name": "roam-approve (root)" },
+    { "path": "host/bridge" },
+    { "path": "host/adapters" },
+    { "path": "device/firmware" }
+  ],
+  "settings": {
+    "python.defaultInterpreterPath": "${workspaceFolder:roam-approve (root)}/.venv/bin/python"
+  }
+}

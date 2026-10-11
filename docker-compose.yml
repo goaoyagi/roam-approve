@@ -1,0 +1,17 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  bridge:
+    # infra/bridge.Dockerfile is not created yet; enable with `docker compose --profile bridge up`
+    profiles: ["bridge"]
+    build:
+      context: host
+      dockerfile: ../infra/bridge.Dockerfile
+    env_file: .env
+    depends_on:
+      - mosquitto

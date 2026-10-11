@@ -1,0 +1,24 @@
+# Secrets (never commit real values)
+.env
+.env.*
+!.env.example
+**/include/config.h
+*.local.json
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+dist/
+*.egg-info/
+
+# PlatformIO
+.pio/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
