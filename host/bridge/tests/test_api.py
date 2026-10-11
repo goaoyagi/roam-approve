@@ -379,6 +379,10 @@ def test_sweeper_expires_request_without_waiting(
             if notifier.messages[-1].topic == RESOLVED_TOPIC:
                 break
             time.sleep(0.01)
+        assert notifier.messages[-1].payload == {
+            "id": created["id"],
+            "status": "expired",
+        }
         listed = client.get(
             "/v1/requests",
             headers={"Authorization": "Bearer test-token-device"},
