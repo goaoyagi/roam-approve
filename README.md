@@ -46,8 +46,32 @@ cd device/firmware && pio run -e m5stickc-plus-se -t upload
 
 ## Using with Devin CLI/Desktop
 
-1. `host/adapters/examples/devin-cli/hooks.v1.json` を、承認を有効化したいプロジェクトの `.devin/hooks.v1.json` にコピーする
-2. そのプロジェクトを起動するシェル環境で `ROAM_BRIDGE_URL` と `ROAM_AGENT_TOKEN` を設定する(hook は親プロセスの env を継承)
+1. hook CLI をインストールして `roam-approve-hook` を PATH に置く:
+
+   ```sh
+   uv tool install ./host/adapters   # リポジトリルートから
+   roam-approve-hook --help           # 動作確認(PATH に無ければ uv tool update-shell)
+   ```
+
+2. `host/adapters/examples/devin-cli/hooks.v1.json` を、承認を有効化したいプロジェクトの `.devin/hooks.v1.json` にコピーする。
+
+3. Devin CLI/Desktop を起動するシェル環境で以下を設定する(hook は親プロセスの env を継承):
+
+   | 変数 | 内容 |
+   |---|---|
+   | `ROAM_BRIDGE_URL` | Bridge の URL(デフォルト `http://127.0.0.1:8000`) |
+   | `ROAM_AGENT_TOKEN` | agent 用 Bearer トークン(必須) |
+   | `ROAM_WAIT_S` | hook が M5 の応答を待つ秒数(デフォルト 240)。hooks の `timeout`(300)より短くすること |
+
+4. Devin で `exec` / `write` / `edit` の PermissionRequest が発生すると M5StickC に表示される。`ask_user_question` などの Q&A は PermissionRequest ではないためデバイスには届かない。
+
+### 動作
+
+| Bridge の結果 | hook の stdout | Devin の動作 |
+|---|---|---|
+| approved | `{"decision":"approve"}` | 承認 |
+| rejected | `{"decision":"block","reason":"Rejected on M5StickC"}` | ブロック |
+| expired / タイムアウト / Bridge エラー | (出力なし, exit 0) | 通常プロンプトへフォールバック |
 
 ## 実装状況
 
@@ -55,7 +79,7 @@ cd device/firmware && pio run -e m5stickc-plus-se -t upload
 |---|---|---|
 | 1 | スキャフォールド + セキュリティ設定 + CI | 完了 |
 | 2 | Bridge 実装 + pytest | 完了 |
-| 3 | Adapters(devin-cli) + hooks 設定例 | 未着手 (Issue 参照) |
+| 3 | Adapters(devin-cli) + hooks 設定例 | 完了 |
 | 4 | Firmware(ApprovalApp + native テスト + M5 HAL) | 未着手 (Issue 参照) |
 | 5 | フェイクデバイス + E2E | 未着手 (Issue 参照) |
 | 6 | 実機検証 + README 仕上げ | 未着手 (Issue 参照) |
