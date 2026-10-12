@@ -4,7 +4,7 @@
 import asyncio
 import logging
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from .models import ApprovalRequest, ApprovalRequestCreate, Decision, Status, utc_now
@@ -25,11 +25,21 @@ class ApprovalStore:
         self,
         clock: Callable[[], datetime] = utc_now,
         on_resolved: Callable[[ApprovalRequest], None] | None = None,
+        retention_s: float = 600,
     ) -> None:
         self._clock = clock
         self._on_resolved = on_resolved
+        self._retention = timedelta(seconds=retention_s)
         self._requests: dict[UUID, ApprovalRequest] = {}
         self._events: dict[UUID, asyncio.Event] = {}
+        self._resolved_at: dict[UUID, datetime] = {}
+
+    def is_pending(self, request_id: str) -> bool:
+        try:
+            request = self._requests.get(UUID(request_id))
+        except ValueError:
+            return False
+        return request is not None and request.status == "pending"
 
     def add(self, create: ApprovalRequestCreate) -> ApprovalRequest:
         request = ApprovalRequest(
@@ -93,7 +103,19 @@ class ApprovalStore:
                 and self._resolve(request, "expired", None)
             ):
                 expired += 1
+        self._purge_resolved(now)
         return expired
+
+    def _purge_resolved(self, now: datetime) -> None:
+        stale = [
+            request_id
+            for request_id, resolved_at in self._resolved_at.items()
+            if now - resolved_at >= self._retention
+        ]
+        for request_id in stale:
+            del self._requests[request_id]
+            del self._events[request_id]
+            del self._resolved_at[request_id]
 
     def _get_known(self, request_id: UUID) -> ApprovalRequest:
         try:
@@ -115,6 +137,7 @@ class ApprovalStore:
             return False
         request.status = status
         request.decided_by = decided_by
+        self._resolved_at[request.id] = self._clock()
         self._events[request.id].set()
         if self._on_resolved is not None:
             try:

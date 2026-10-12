@@ -77,8 +77,10 @@ roam-approve/
 
 ### MQTT トピック
 
-- `roam/approval/request`(retained): `{id, agent, title, lines[], expires_at}` — コマンド全文ではなく要約のみ
-- `roam/approval/resolved`: `{id, status}` — デバイスの表示クリア用。決定/期限切れ時に retained も空で上書き
+- `roam/approval/request/{id}`(retained、要求ごと): `{id, agent, title, lines[], expires_at}` — コマンド全文ではなく要約のみ。デバイスは `roam/approval/request/+` を購読
+- `roam/approval/resolved`: `{id, status}` — デバイスの表示クリア用。決定/期限切れ時に該当 `{id}` の retained も空で上書き
+- Bridge は起動・再接続時に `roam/approval/request/+` を購読し、自分が pending として知らない retained(再起動前の残骸)を空で上書きする
+- 解決済み要求は 600 秒保持後に Bridge のメモリから削除される(以降の `wait` / `decision` は 404)
 - MQTT は LAN 内匿名(v1)で誰でも publish できるため、**MQTT の内容は信頼しない**。デバイスは MQTT 受信を「更新の合図」としてのみ扱い、表示・承認の対象は device トークン付き `GET /v1/requests?status=pending` で取得したものに限る(下記 Design rules 参照)
 
 ### Devin CLI hook(利用側プロジェクトの `.devin/hooks.v1.json`)

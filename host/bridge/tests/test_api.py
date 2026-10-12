@@ -3,7 +3,7 @@ import time
 from uuid import UUID, uuid4
 
 import pytest
-from roam_approve_bridge.notifier.base import REQUEST_TOPIC, RESOLVED_TOPIC
+from roam_approve_bridge.notifier.base import RESOLVED_TOPIC, request_topic
 
 
 def request_payload(**updates):
@@ -63,7 +63,7 @@ def test_create_request_publishes_summary(client, agent_headers, notifier):
     assert isinstance(UUID(response.json()["id"]), UUID)
     assert len(notifier.messages) == 1
     message = notifier.messages[0]
-    assert message.topic == REQUEST_TOPIC
+    assert message.topic == request_topic(response.json()["id"])
     assert message.retain is True
     assert set(message.payload) == {
         "id",
@@ -203,7 +203,7 @@ def test_wait_after_expiration_publishes_resolution(
         "status": "expired",
         "reason": "expired before decision",
     }
-    assert notifier.messages[-2].topic == REQUEST_TOPIC
+    assert notifier.messages[-2].topic == request_topic(created["id"])
     assert notifier.messages[-2].payload is None
     assert notifier.messages[-2].retain is True
     assert notifier.messages[-1].topic == RESOLVED_TOPIC
@@ -233,7 +233,7 @@ def test_decision_publishes_clear_and_resolved_message(
     assert response.status_code == 200
     assert response.json()["decided_by"] == "device"
     assert [message.topic for message in notifier.messages[-2:]] == [
-        REQUEST_TOPIC,
+        request_topic(created["id"]),
         RESOLVED_TOPIC,
     ]
     assert notifier.messages[-2].payload is None

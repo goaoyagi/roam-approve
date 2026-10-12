@@ -45,6 +45,25 @@ def test_lazy_expiry_and_conflict(clock):
         raise AssertionError("resolved request accepted a new decision")
 
 
+def test_resolved_requests_are_purged_after_retention(clock):
+    store = ApprovalStore(clock=clock, retention_s=60)
+    done = store.add(request_create())
+    pending = store.add(request_create())
+    store.decide(done.id, Decision(decision="approve"))
+    clock.advance(59)
+    store.expire_due()
+    assert store.get(done.id).status == "approved"
+    clock.advance(1)
+    store.expire_due()
+    try:
+        store.get(done.id)
+    except NotFoundError:
+        pass
+    else:
+        raise AssertionError("resolved request was not purged")
+    assert store.is_pending(str(pending.id))
+
+
 def test_unknown_request_raises_not_found(clock):
     from uuid import uuid4
 

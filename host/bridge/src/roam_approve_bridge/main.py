@@ -29,7 +29,11 @@ def create_app(
         if settings.notifier == "memory":
             notifier = MemoryNotifier()
         else:
-            notifier = MqttNotifier(settings.mqtt_host, settings.mqtt_port)
+            notifier = MqttNotifier(
+                settings.mqtt_host,
+                settings.mqtt_port,
+                is_pending=lambda request_id: store.is_pending(request_id),
+            )
 
     store = ApprovalStore(
         clock=clock or utc_now,

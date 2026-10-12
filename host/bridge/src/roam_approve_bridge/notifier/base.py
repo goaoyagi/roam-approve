@@ -3,11 +3,17 @@
 
 from datetime import UTC
 from typing import Protocol
+from uuid import UUID
 
 from ..models import ApprovalRequest
 
 REQUEST_TOPIC = "roam/approval/request"
+REQUEST_TOPIC_FILTER = f"{REQUEST_TOPIC}/+"
 RESOLVED_TOPIC = "roam/approval/resolved"
+
+
+def request_topic(request_id: UUID | str) -> str:
+    return f"{REQUEST_TOPIC}/{request_id}"
 
 
 def request_payload(request: ApprovalRequest) -> dict[str, object]:

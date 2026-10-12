@@ -5,9 +5,9 @@ from dataclasses import dataclass
 
 from ..models import ApprovalRequest
 from .base import (
-    REQUEST_TOPIC,
     RESOLVED_TOPIC,
     request_payload,
+    request_topic,
     resolved_payload,
 )
 
@@ -31,11 +31,17 @@ class MemoryNotifier:
 
     def publish_request(self, request: ApprovalRequest) -> None:
         self.messages.append(
-            PublishedMessage(REQUEST_TOPIC, request_payload(request), retain=True)
+            PublishedMessage(
+                request_topic(request.id),
+                request_payload(request),
+                retain=True,
+            )
         )
 
     def publish_resolved(self, request: ApprovalRequest) -> None:
-        self.messages.append(PublishedMessage(REQUEST_TOPIC, None, retain=True))
+        self.messages.append(
+            PublishedMessage(request_topic(request.id), None, retain=True)
+        )
         self.messages.append(
             PublishedMessage(
                 RESOLVED_TOPIC,
