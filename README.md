@@ -50,7 +50,7 @@ cd device/firmware && pio run -e m5stickc-plus-se -t upload
 
    ```sh
    uv tool install ./host/adapters   # リポジトリルートから
-   roam-approve-hook --help           # 動作確認(PATH に無ければ uv tool update-shell)
+   command -v roam-approve-hook       # PATH 確認(見つからなければ uv tool update-shell)
    ```
 
 2. `host/adapters/examples/devin-cli/hooks.v1.json` を、承認を有効化したいプロジェクトの `.devin/hooks.v1.json` にコピーする。
