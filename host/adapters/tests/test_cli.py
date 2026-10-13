@@ -13,6 +13,7 @@ from roam_approve_adapters import cli
 class MockBridge:
     def __init__(self) -> None:
         self.post_status = 201
+        self.redirect_to: str | None = None
         self.wait_status = "approved"
         self.wait_http_status = 200
         self.wait_sleep = 0.0
@@ -43,6 +44,12 @@ class MockBridge:
                 length = int(self.headers.get("Content-Length", 0))
                 outer.requests.append(json.loads(self.rfile.read(length) or b"{}"))
                 if self.path == "/v1/requests":
+                    if outer.redirect_to is not None:
+                        self.send_response(302)
+                        self.send_header("Location", outer.redirect_to)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return
                     if outer.post_status != 201:
                         self._send(outer.post_status, {"detail": "error"})
                         return
@@ -200,6 +207,33 @@ def test_invalid_stdin_json(monkeypatch, capsys, bridge) -> None:
     code, captured = run_hook(monkeypatch, capsys, bridge)
     assert code == 0
     assert captured.out == ""
+
+
+def test_wait_s_clamped_to_280(monkeypatch, capsys, bridge, stdin_event) -> None:
+    code, captured = run_hook(monkeypatch, capsys, bridge, wait_s="3600")
+    assert code == 0
+    assert captured.out.strip() == '{"decision":"approve"}'
+    assert bridge.requests[0]["timeout_s"] == 280
+
+
+def test_wait_s_zero_clamped_to_1(monkeypatch, capsys, bridge, stdin_event) -> None:
+    code, captured = run_hook(monkeypatch, capsys, bridge, wait_s="0")
+    assert code == 0
+    assert captured.out.strip() == '{"decision":"approve"}'
+    assert bridge.requests[0]["timeout_s"] == 1
+
+
+def test_post_redirect_not_followed(
+    monkeypatch, capsys, bridge, stdin_event
+) -> None:
+    with MockBridge() as redirect_target:
+        bridge.redirect_to = f"{redirect_target.url}/v1/requests"
+        code, captured = run_hook(monkeypatch, capsys, bridge)
+    assert code == 0
+    assert captured.out == ""
+    assert "302" in captured.err
+    assert redirect_target.requests == []
+    assert redirect_target.auth_headers == []
 
 
 def test_unknown_agent(monkeypatch, capsys, bridge, stdin_event) -> None:

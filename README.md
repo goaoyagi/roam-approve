@@ -61,7 +61,7 @@ cd device/firmware && pio run -e m5stickc-plus-se -t upload
    |---|---|
    | `ROAM_BRIDGE_URL` | Bridge の URL(デフォルト `http://127.0.0.1:8000`) |
    | `ROAM_AGENT_TOKEN` | agent 用 Bearer トークン(必須) |
-   | `ROAM_WAIT_S` | hook が M5 の応答を待つ秒数(デフォルト 240)。hooks の `timeout`(300)より短くすること |
+   | `ROAM_WAIT_S` | hook が M5 の応答を待つ秒数(デフォルト 240、最大 280。超過分はクランプ)。HTTP 往復の余裕(~20 秒)を含めて hooks の `timeout`(300)未満に収める |
 
 4. Devin で `exec` / `write` / `edit` の PermissionRequest が発生すると M5StickC に表示される。`ask_user_question` などの Q&A は PermissionRequest ではないためデバイスには届かない。
 

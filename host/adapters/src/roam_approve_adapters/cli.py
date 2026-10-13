@@ -7,9 +7,14 @@ agent falls back to its normal prompt. Never exit non-zero.
 import json
 import os
 import sys
+import time
 
 from .client import BridgeClient
 from .registry import get_adapter
+
+# hooks.v1.json gives the hook a 300s timeout; keep the wait plus ~20s of
+# HTTP overhead below it.
+MAX_WAIT_S = 280
 
 
 def _diag(message: str) -> None:
@@ -22,7 +27,7 @@ def _wait_seconds() -> int:
         value = int(raw) if raw else 240
     except ValueError:
         value = 240
-    return max(1, min(3600, value))
+    return max(1, min(MAX_WAIT_S, value))
 
 
 def _run(argv: list[str]) -> int:
@@ -52,12 +57,13 @@ def _run(argv: list[str]) -> int:
     bridge_url = os.environ.get("ROAM_BRIDGE_URL", "http://127.0.0.1:8000")
     wait_s = _wait_seconds()
 
+    deadline = time.monotonic() + wait_s
     client = BridgeClient(bridge_url, token)
     request_id = client.create(request, timeout_s=wait_s)
     if request_id is None:
         return 0
 
-    result = client.wait(request_id, wait_s)
+    result = client.wait(request_id, deadline - time.monotonic())
     stdout_text, exit_code = adapter.render(result)
     if stdout_text:
         print(stdout_text)

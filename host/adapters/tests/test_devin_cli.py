@@ -45,6 +45,18 @@ def test_parse_edit_file_path() -> None:
     assert req.lines == ["/a/b.py"]
 
 
+def test_parse_empty_command_falls_back_to_file_path() -> None:
+    req = parse(
+        {
+            "tool_name": "exec",
+            "session_id": "s",
+            "tool_input": {"command": "", "file_path": "/tmp/a.txt"},
+        }
+    )
+    assert req is not None
+    assert req.lines == ["/tmp/a.txt"]
+
+
 def test_parse_command_takes_precedence_over_file_path() -> None:
     req = parse(
         {

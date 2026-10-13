@@ -17,6 +17,16 @@ def _diag(message: str) -> None:
     print(f"roam-approve-hook: {message}", file=sys.stderr)
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects so the Authorization header is never re-sent."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ARG002
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
 class BridgeClient:
     def __init__(self, base_url: str, token: str) -> None:
         self._base = base_url.rstrip("/")
@@ -37,7 +47,7 @@ class BridgeClient:
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with _OPENER.open(req, timeout=timeout) as resp:
                 payload = json.loads(resp.read().decode())
         except urllib.error.HTTPError as error:
             _diag(f"bridge returned HTTP {error.code}")
@@ -78,7 +88,7 @@ class BridgeClient:
                 "GET",
                 f"/v1/requests/{request_id}/wait?timeout_s={chunk}",
                 None,
-                timeout=chunk + 10,
+                timeout=chunk + 5,
             )
             if payload is None:
                 return "unreachable"

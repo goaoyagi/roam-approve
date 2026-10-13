@@ -36,7 +36,7 @@ class DevinCliAdapter(AgentAdapter):
         if isinstance(tool_input, dict):
             for key in ("command", "file_path"):
                 value = tool_input.get(key)
-                if isinstance(value, str):
+                if isinstance(value, str) and value:
                     source = value
                     break
         return ApprovalRequest(
