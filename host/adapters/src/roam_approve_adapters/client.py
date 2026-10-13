@@ -20,7 +20,7 @@ def _diag(message: str) -> None:
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """Refuse redirects so the Authorization header is never re-sent."""
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ARG002
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
 
 
