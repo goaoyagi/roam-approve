@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <deque>
 #include <string>
 #include <utility>
@@ -30,6 +31,14 @@ struct DisplayMock : hal::IDisplay {
       }
     }
     return false;
+  }
+
+  bool lastDrawHasText(const std::string& text) const {
+    if (draws.empty()) return false;
+    return std::any_of(draws.back().begin(), draws.back().end(),
+                       [&text](const std::string& line) {
+                         return line.find(text) != std::string::npos;
+                       });
   }
 };
 
@@ -141,6 +150,28 @@ std::string requestJson(const std::string& id = kId1,
          "\",\"lines\":[\"detail one\",\"detail two\",\"detail three\","
          "\"detail four\",\"detail five\"],\"expires_at\":\"" + expires +
          "\",\"session_id\":\"ignored\"}]";
+}
+
+std::string largeRequestListJson() {
+  const std::string detail(256, 'd');
+  const std::string ignored(2000, 'x');
+  std::string response = "[";
+  for (size_t request = 0; request < 2; ++request) {
+    if (request > 0) response += ",";
+    response += "{\"id\":\"";
+    response += request == 0 ? kId1 : kId2;
+    response +=
+        "\",\"agent\":\"devin\",\"title\":\"large request\",\"lines\":[";
+    for (size_t line = 0; line < 32; ++line) {
+      if (line > 0) response += ",";
+      response += "\"" + detail + "\"";
+    }
+    response +=
+        "],\"expires_at\":\"2026-10-14T19:30:00Z\",\"ignored\":\"" +
+        ignored + "\"}";
+  }
+  response += "]";
+  return response;
 }
 
 struct Fixture {
@@ -361,6 +392,63 @@ void test_request_disappearing_from_http_list_cannot_be_decided() {
   TEST_ASSERT_EQUAL(ApprovalApp::State::Idle, fixture.app.state());
 }
 
+void test_send_failure_does_not_carry_over_to_next_request() {
+  Fixture fixture;
+  fixture.start();
+  fixture.http.postStatuses.push_back(-1);
+  fixture.buttons.pressedA = true;
+  fixture.app.tick();
+  TEST_ASSERT_TRUE(fixture.display.lastDrawHasText("send failed, retry"));
+
+  fixture.http.getResponses.push_back({200, requestJson(kId2, "request B")});
+  fixture.syncAfterSignal("roam/approval/resolved");
+  TEST_ASSERT_EQUAL_STRING(kId2, fixture.app.displayedId().c_str());
+  TEST_ASSERT_FALSE(fixture.display.lastDrawHasText("send failed, retry"));
+}
+
+void test_simultaneous_button_presses_only_count_as_activity() {
+  ApprovalConfig config{"http://bridge", "test-token"};
+  config.idleDimMs = 100;
+  Fixture fixture(config);
+  fixture.start();
+
+  fixture.buttons.pressedA = true;
+  fixture.buttons.pressedB = true;
+  fixture.app.tick();
+  TEST_ASSERT_EQUAL(0, fixture.http.postCalls);
+
+  fixture.clock.advance(100);
+  fixture.app.tick();
+  TEST_ASSERT_EQUAL(8, fixture.display.brightness.back());
+
+  fixture.buttons.pressedA = true;
+  fixture.buttons.pressedB = true;
+  fixture.app.tick();
+  TEST_ASSERT_EQUAL(0, fixture.http.postCalls);
+  TEST_ASSERT_EQUAL(100, fixture.display.brightness.back());
+  fixture.clock.advance(99);
+  fixture.app.tick();
+  TEST_ASSERT_EQUAL(100, fixture.display.brightness.back());
+  fixture.clock.advance(1);
+  fixture.app.tick();
+  TEST_ASSERT_EQUAL(8, fixture.display.brightness.back());
+}
+
+void test_large_pending_response_with_two_requests_syncs() {
+  Fixture fixture;
+  fixture.http.getBody = largeRequestListJson();
+  TEST_ASSERT_TRUE(fixture.http.getBody.size() > 20000);
+  TEST_ASSERT_TRUE(fixture.http.getBody.size() < hal::kMaxHttpResponseBytes);
+  fixture.app.begin();
+  fixture.app.tick();
+
+  TEST_ASSERT_FALSE(fixture.app.lastSyncFailed());
+  TEST_ASSERT_EQUAL(ApprovalApp::State::Showing, fixture.app.state());
+  TEST_ASSERT_EQUAL_STRING(kId1, fixture.app.displayedId().c_str());
+  TEST_ASSERT_EQUAL_STRING("devin 1/2",
+                           fixture.display.draws.back()[0].c_str());
+}
+
 void test_fake_resolved_or_empty_retained_does_not_hide_http_pending() {
   Fixture fixture;
   fixture.start();
@@ -474,6 +562,9 @@ int main() {
   runTest(test_http_404_and_409_drop_request_and_resync_without_error);
   runTest(test_fake_mqtt_payload_is_never_shown_or_decided);
   runTest(test_request_disappearing_from_http_list_cannot_be_decided);
+  runTest(test_send_failure_does_not_carry_over_to_next_request);
+  runTest(test_simultaneous_button_presses_only_count_as_activity);
+  runTest(test_large_pending_response_with_two_requests_syncs);
   runTest(test_fake_resolved_or_empty_retained_does_not_hide_http_pending);
   runTest(test_mqtt_burst_is_debounced_to_one_trailing_sync);
   runTest(test_mqtt_reconnect_subscribes_and_syncs);

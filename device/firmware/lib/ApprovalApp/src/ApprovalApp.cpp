@@ -13,7 +13,6 @@ constexpr char kRequestTopicPrefix[] = "roam/approval/request/";
 constexpr char kResolvedTopic[] = "roam/approval/resolved";
 constexpr size_t kMaxPendings = 8;
 constexpr size_t kMaxLines = 4;
-constexpr size_t kMaxResponseBytes = 16384;
 
 bool isDigits(const std::string& value, size_t offset, size_t length) {
   if (offset + length > value.size()) return false;
@@ -179,7 +178,8 @@ void ApprovalApp::performSync(uint32_t nowMs) {
   lastSyncAttemptMs_ = nowMs;
   hasSyncAttempt_ = true;
   const int status = http_.getJson(requestsUrl(), config_.deviceToken, body);
-  if (status < 200 || status >= 300 || body.size() > kMaxResponseBytes) {
+  if (status < 200 || status >= 300 ||
+      body.size() > hal::kMaxHttpResponseBytes) {
     syncFailed_ = true;
     syncDirty_ = true;
     nextSyncRetryMs_ = nowMs + syncBackoff_.nextDelayMs();
@@ -330,6 +330,7 @@ void ApprovalApp::updateVisibleState() {
     displayedId_ = pending_.front().id;
     state_ = State::Showing;
   }
+  if (displayedId_ != previousId) sendFailed_ = false;
   if (displayedId_ != previousId || state_ == State::Showing) render();
   else renderIdle();
 }
@@ -345,6 +346,7 @@ void ApprovalApp::handleButtons(uint32_t nowMs) {
     render();
     return;
   }
+  if (approve == reject) return;
   if (state_ != State::Showing || displayedId_.empty()) return;
 
   const bool stillPending = containsPending(displayedId_);

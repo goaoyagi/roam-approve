@@ -2,6 +2,7 @@
 
 #include "M5Hal.h"
 
+#include <cstdio>
 #include <ctime>
 #include <string>
 
@@ -19,7 +20,7 @@ void DeviceDisplay::clear() { M5.Lcd.fillScreen(BLACK); }
 
 void DeviceDisplay::drawLines(const std::vector<std::string>& lines) {
   M5.Lcd.setTextColor(WHITE, BLACK);
-  M5.Lcd.setTextSize(1);
+  M5.Lcd.setTextSize(2);
   for (size_t i = 0; i < lines.size(); ++i) {
     M5.Lcd.setCursor(0, static_cast<int32_t>(i * 20));
     M5.Lcd.println(lines[i].c_str());
@@ -61,7 +62,12 @@ bool M5Mqtt::connectWifi() {
 bool M5Mqtt::connect() {
   if (!connectWifi()) return false;
   if (client_.connected()) return true;
-  return client_.connect("roam-approve");
+  char clientId[20];
+  const uint32_t chipId =
+      static_cast<uint32_t>(ESP.getEfuseMac() & 0xFFFFFF);
+  std::snprintf(clientId, sizeof(clientId), "roam-approve-%06lx",
+                static_cast<unsigned long>(chipId));
+  return client_.connect(clientId);
 }
 
 bool M5Mqtt::connected() const { return client_.connected(); }
@@ -106,11 +112,18 @@ int M5Http::postJson(const std::string& url, const std::string& bearer,
 
 int M5Http::getJson(const std::string& url, const std::string& bearer,
                     std::string& outBody) {
+  outBody.clear();
   HTTPClient client;
   if (!client.begin(url.c_str())) return -1;
   addHeaders(client, bearer);
   const int status = client.GET();
   if (status >= 200 && status < 300) {
+    const int contentLength = client.getSize();
+    if (contentLength > 0 &&
+        static_cast<size_t>(contentLength) > hal::kMaxHttpResponseBytes) {
+      client.end();
+      return -2;
+    }
     outBody = client.getString().c_str();
   }
   client.end();

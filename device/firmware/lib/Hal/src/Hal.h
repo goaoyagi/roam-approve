@@ -1,11 +1,14 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
 
 namespace hal {
+
+constexpr size_t kMaxHttpResponseBytes = 65536;
 
 class IDisplay {
  public:
