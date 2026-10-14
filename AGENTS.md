@@ -36,8 +36,9 @@ roam-approve/
 │   └── firmware/                    # PlatformIO (M5StickC PLUS SE)
 │       ├── platformio.ini           # env:m5stickc-plus-se / env:native
 │       ├── src/main.cpp             # 配線のみ: HAL(M5 実装) + ApprovalApp
+│       ├── src/hal_m5/              # M5StickC / Wi-Fi / MQTT / HTTP の HAL 実装
 │       ├── lib/ApprovalApp/         # 純粋ロジック(Arduino 非依存)
-│       ├── lib/Hal/                 # IDisplay / IButtons / IMqtt / IHttp / IPower
+│       ├── lib/Hal/                 # IDisplay / IButtons / IMqtt / IHttp(get/post) / IPower / IClock
 │       ├── test/test_app/           # env:native で走る Unity テスト
 │       └── include/config.example.h # → config.h にコピー(config.h は gitignore)
 ├── tools/
@@ -97,7 +98,7 @@ roam-approve/
 ## Design rules
 
 - **Bridge は正規化された `ApprovalRequest` しか知らない**。エージェント固有の差分は `host/adapters` 内の parse/render に閉じ込める。Bridge と firmware は原則触らない。
-- **firmware のロジックは `lib/ApprovalApp` に置き、Arduino 非依存・`env:native` でテスト可能にする**。`src/main.cpp` は配線のみ。ハード依存は `lib/Hal` のインタフェース(IDisplay / IButtons / IMqtt / IHttp / IPower)越しに限定。
+- **firmware のロジックは `lib/ApprovalApp` に置き、Arduino 非依存・`env:native` でテスト可能にする**。`src/main.cpp` は配線のみ。ハード依存は `lib/Hal` のインタフェース(IDisplay / IButtons / IMqtt / IHttp / IPower / IClock)越しに限定。`IHttp` は `postJson` と `getJson` を提供する。
 - **firmware は MQTT payload を表示・承認に使わない**。`roam/approval/request` / `roam/approval/resolved` を受信したら、device トークン付き `GET /v1/requests?status=pending` を呼んで状態を同期し、HTTP で取得した `id` / `title` / `lines` のみ表示する。HTTP の一覧にない `id` は表示せず、decision も送らない。起動時・再接続時にも同じ同期を行う。`lib/ApprovalApp` の native テストで「偽 MQTT payload を表示しない」「一覧にない id を承認しない」を検証する。
 - **adapters はランタイム依存ゼロ(stdlib のみ)**。hook 起動ごとに実行されるため外部パッケージを入れない。
 - **M5 に届くのは `PermissionRequest` かつ `matcher: ^(exec|write|edit)$` のみ**。`ask_user_question` などの Q&A 形式の問い合わせは PermissionRequest ではないため **Bridge に届かず IDE で完結する**。質問待ちを M5 に通知だけしたい場合は `PreToolUse` + `matcher: ^ask_user_question$` + Bridge `kind: notify`(v2 候補)。
