@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include <ArduinoJson.h>
+
 #include "Backoff.h"
 #include "Hal.h"
 
@@ -18,7 +20,9 @@ struct ApprovalConfig {
   uint32_t syncMinIntervalMs = 1000;
   uint32_t periodicSyncMs = 30000;
   uint32_t doneDisplayMs = 1500;
-  uint32_t fallbackTimeoutMs = 300000;
+  // Presses within this window after the displayed request changes are
+  // ignored so a press aimed at the previous request never decides a new one.
+  uint32_t inputGuardMs = 1000;
   uint32_t idleDimMs = 30000;
   uint8_t normalBrightness = 100;
   uint8_t dimBrightness = 8;
@@ -62,7 +66,9 @@ class ApprovalApp {
   bool lastSyncFailed() const { return syncFailed_; }
 
   static bool parseIso8601(const std::string& value, int64_t& epochSeconds);
-  static std::string truncateUtf8(const std::string& value, size_t maxBytes);
+  // The built-in LCD font is ASCII only: each UTF-8 code point becomes one
+  // cell, non-ASCII is shown as '?', and the result is capped at maxChars.
+  static std::string toDisplayText(const std::string& value, size_t maxChars);
 
  private:
   struct Pending {
@@ -71,14 +77,22 @@ class ApprovalApp {
     std::string title;
     std::vector<std::string> lines;
     int64_t expiresAt = 0;
-    uint32_t firstSeenMs = 0;
   };
+
+  bool readPendingList(hal::IByteReader& body, int64_t epochNow,
+                       std::vector<Pending>& next,
+                       std::vector<std::string>& responseIds);
+  void collectPending(const JsonDocument& element, int64_t epochNow,
+                      std::vector<Pending>& next,
+                      std::vector<std::string>& responseIds);
+  bool isExpired(const Pending& item, int64_t epochNow) const;
+  void draw(const std::vector<std::string>& lines);
 
   void handleMqttMessage(const std::string& topic,
                          const std::string& payload);
   void maintainMqtt();
   void performSync(uint32_t nowMs);
-  void expireRequests(uint32_t nowMs);
+  void expireRequests();
   void updateVisibleState();
   void handleButtons(uint32_t nowMs);
   void sendDecision(bool approve, uint32_t nowMs);
@@ -101,6 +115,9 @@ class ApprovalApp {
   std::vector<std::string> locallyExpiredIds_;
   std::string displayedId_;
   std::string doneMessage_;
+  std::vector<std::string> drawnLines_;
+  bool hasDrawn_ = false;
+  uint32_t displayChangedMs_ = 0;
   uint32_t doneUntilMs_ = 0;
   bool syncDirty_ = false;
   bool syncFailed_ = false;

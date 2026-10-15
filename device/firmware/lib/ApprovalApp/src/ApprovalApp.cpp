@@ -12,7 +12,55 @@ namespace {
 constexpr char kRequestTopicPrefix[] = "roam/approval/request/";
 constexpr char kResolvedTopic[] = "roam/approval/resolved";
 constexpr size_t kMaxPendings = 8;
-constexpr size_t kMaxLines = 4;
+constexpr size_t kMaxLines = 3;
+// Bounds parse time and the id list kept for local-expiry bookkeeping.
+constexpr size_t kMaxListedRequests = 64;
+constexpr size_t kLineChars = 20;
+constexpr size_t kAgentChars = 15;
+
+class PeekableReader {
+ public:
+  explicit PeekableReader(hal::IByteReader& source) : source_(source) {}
+
+  int read() {
+    if (peeked_ >= 0 || peeked_ == kEof) {
+      const int value = peeked_;
+      peeked_ = kEmpty;
+      return value;
+    }
+    return source_.read();
+  }
+
+  size_t readBytes(char* buffer, size_t length) {
+    size_t count = 0;
+    while (count < length) {
+      const int value = read();
+      if (value < 0) break;
+      buffer[count++] = static_cast<char>(value);
+    }
+    return count;
+  }
+
+  int nextNonSpace() {
+    int value = read();
+    while (value >= 0 && std::isspace(static_cast<unsigned char>(value))) {
+      value = read();
+    }
+    return value;
+  }
+
+  int peekNonSpace() {
+    const int value = nextNonSpace();
+    peeked_ = value < 0 ? kEof : value;
+    return value;
+  }
+
+ private:
+  static constexpr int kEmpty = -2;
+  static constexpr int kEof = -1;
+  hal::IByteReader& source_;
+  int peeked_ = kEmpty;
+};
 
 bool isDigits(const std::string& value, size_t offset, size_t length) {
   if (offset + length > value.size()) return false;
@@ -174,88 +222,25 @@ void ApprovalApp::performSync(uint32_t nowMs) {
     return;
   }
 
-  std::string body;
   lastSyncAttemptMs_ = nowMs;
   hasSyncAttempt_ = true;
-  const int status = http_.getJson(requestsUrl(), config_.deviceToken, body);
-  if (status < 200 || status >= 300 ||
-      body.size() > hal::kMaxHttpResponseBytes) {
-    syncFailed_ = true;
-    syncDirty_ = true;
-    nextSyncRetryMs_ = nowMs + syncBackoff_.nextDelayMs();
-    syncRetryScheduled_ = true;
-    render();
-    return;
-  }
-
-  JsonDocument filter;
-  filter[0]["id"] = true;
-  filter[0]["agent"] = true;
-  filter[0]["title"] = true;
-  filter[0]["lines"][0] = true;
-  filter[0]["expires_at"] = true;
-  JsonDocument document;
-  const DeserializationError error =
-      deserializeJson(document, body, DeserializationOption::Filter(filter),
-                     DeserializationOption::NestingLimit(8));
-  if (error || !document.is<JsonArray>()) {
-    syncFailed_ = true;
-    syncDirty_ = true;
-    nextSyncRetryMs_ = nowMs + syncBackoff_.nextDelayMs();
-    syncRetryScheduled_ = true;
-    render();
-    return;
-  }
-
+  const int64_t epochNow = clock_.epochSeconds();
   std::vector<Pending> next;
   std::vector<std::string> responseIds;
-  const int64_t epochNow = clock_.epochSeconds();
-  for (JsonVariantConst value : document.as<JsonArrayConst>()) {
-    const char* id = value["id"] | static_cast<const char*>(nullptr);
-    if (id == nullptr || !isValidId(id)) continue;
-    responseIds.emplace_back(id);
-    if (std::find(locallyExpiredIds_.begin(), locallyExpiredIds_.end(), id) !=
-            locallyExpiredIds_.end() ||
-        next.size() >= kMaxPendings) {
-      continue;
-    }
-    const char* agent = value["agent"] | static_cast<const char*>(nullptr);
-    const char* title = value["title"] | static_cast<const char*>(nullptr);
-    const char* expires = value["expires_at"] | static_cast<const char*>(nullptr);
-    if (agent == nullptr || title == nullptr || expires == nullptr) {
-      continue;
-    }
-
-    Pending item;
-    item.id = id;
-    item.agent = agent;
-    item.title = title;
-    if (!parseIso8601(expires, item.expiresAt)) continue;
-    JsonArrayConst lineValues = value["lines"].as<JsonArrayConst>();
-    for (JsonVariantConst line : lineValues) {
-      if (item.lines.size() >= kMaxLines) break;
-      const char* text = line | static_cast<const char*>(nullptr);
-      if (text != nullptr) item.lines.emplace_back(text);
-    }
-
-    auto previous = std::find_if(
-        pending_.begin(), pending_.end(),
-        [&item](const Pending& candidate) { return candidate.id == item.id; });
-    if (previous != pending_.end()) {
-      item.firstSeenMs = previous->firstSeenMs;
-    } else {
-      item.firstSeenMs = nowMs;
-    }
-    const bool expired =
-        epochNow > 0 ? epochNow >= item.expiresAt
-                     : static_cast<uint32_t>(nowMs - item.firstSeenMs) >=
-                           config_.fallbackTimeoutMs;
-    if (expired) {
-      locallyExpiredIds_.push_back(item.id);
-    } else {
-      next.push_back(std::move(item));
-    }
+  bool parsed = false;
+  const int status = http_.getJson(
+      requestsUrl(), config_.deviceToken, [&](hal::IByteReader& body) {
+        parsed = readPendingList(body, epochNow, next, responseIds);
+      });
+  if (status < 200 || status >= 300 || !parsed) {
+    syncFailed_ = true;
+    syncDirty_ = true;
+    nextSyncRetryMs_ = nowMs + syncBackoff_.nextDelayMs();
+    syncRetryScheduled_ = true;
+    render();
+    return;
   }
+
   locallyExpiredIds_.erase(
       std::remove_if(locallyExpiredIds_.begin(), locallyExpiredIds_.end(),
                      [&responseIds](const std::string& id) {
@@ -282,28 +267,90 @@ void ApprovalApp::performSync(uint32_t nowMs) {
   updateVisibleState();
 }
 
-void ApprovalApp::expireRequests(uint32_t nowMs) {
+bool ApprovalApp::readPendingList(hal::IByteReader& body, int64_t epochNow,
+                                  std::vector<Pending>& next,
+                                  std::vector<std::string>& responseIds) {
+  JsonDocument filter;
+  filter["id"] = true;
+  filter["agent"] = true;
+  filter["title"] = true;
+  filter["lines"][0] = true;
+  filter["expires_at"] = true;
+
+  // Parse one array element at a time so the response size never dictates
+  // RAM usage; only the filtered fields of the current element are held.
+  PeekableReader reader(body);
+  if (reader.nextNonSpace() != '[') return false;
+  if (reader.peekNonSpace() == ']') return reader.read() == ']';
+  for (size_t count = 0; count < kMaxListedRequests; ++count) {
+    JsonDocument element;
+    const DeserializationError error =
+        deserializeJson(element, reader, DeserializationOption::Filter(filter),
+                        DeserializationOption::NestingLimit(4));
+    if (error) return false;
+    collectPending(element, epochNow, next, responseIds);
+    const int separator = reader.nextNonSpace();
+    if (separator == ']') return true;
+    if (separator != ',') return false;
+  }
+  return true;
+}
+
+void ApprovalApp::collectPending(const JsonDocument& element, int64_t epochNow,
+                                 std::vector<Pending>& next,
+                                 std::vector<std::string>& responseIds) {
+  const char* id = element["id"] | static_cast<const char*>(nullptr);
+  if (id == nullptr || !isValidId(id)) return;
+  responseIds.emplace_back(id);
+  if (next.size() >= kMaxPendings ||
+      std::find(locallyExpiredIds_.begin(), locallyExpiredIds_.end(), id) !=
+          locallyExpiredIds_.end()) {
+    return;
+  }
+  const char* agent = element["agent"] | static_cast<const char*>(nullptr);
+  const char* title = element["title"] | static_cast<const char*>(nullptr);
+  const char* expires = element["expires_at"] | static_cast<const char*>(nullptr);
+  if (agent == nullptr || title == nullptr || expires == nullptr) return;
+
+  Pending item;
+  item.id = id;
+  item.agent = agent;
+  item.title = title;
+  if (!parseIso8601(expires, item.expiresAt)) return;
+  for (JsonVariantConst line : element["lines"].as<JsonArrayConst>()) {
+    if (item.lines.size() >= kMaxLines) break;
+    const char* text = line | static_cast<const char*>(nullptr);
+    if (text != nullptr) item.lines.emplace_back(text);
+  }
+  if (isExpired(item, epochNow)) {
+    locallyExpiredIds_.push_back(item.id);
+  } else {
+    next.push_back(std::move(item));
+  }
+}
+
+// Without a wall clock the Bridge is the only authority on expiry: requests
+// may live up to an hour, so a local guess would hide still-pending ones.
+bool ApprovalApp::isExpired(const Pending& item, int64_t epochNow) const {
+  return epochNow > 0 && epochNow >= item.expiresAt;
+}
+
+void ApprovalApp::expireRequests() {
   const int64_t epochNow = clock_.epochSeconds();
+  if (epochNow <= 0) return;
   const size_t before = pending_.size();
   for (const Pending& item : pending_) {
-    const bool expired =
-        epochNow > 0 ? epochNow >= item.expiresAt
-                     : static_cast<uint32_t>(nowMs - item.firstSeenMs) >=
-                           config_.fallbackTimeoutMs;
-    if (expired &&
+    if (isExpired(item, epochNow) &&
         std::find(locallyExpiredIds_.begin(), locallyExpiredIds_.end(),
                   item.id) == locallyExpiredIds_.end()) {
       locallyExpiredIds_.push_back(item.id);
     }
   }
-  pending_.erase(
-      std::remove_if(pending_.begin(), pending_.end(),
-                     [this, nowMs, epochNow](const Pending& item) {
-                       if (epochNow > 0) return epochNow >= item.expiresAt;
-                       return static_cast<uint32_t>(nowMs - item.firstSeenMs) >=
-                              config_.fallbackTimeoutMs;
-                     }),
-      pending_.end());
+  pending_.erase(std::remove_if(pending_.begin(), pending_.end(),
+                                [this, epochNow](const Pending& item) {
+                                  return isExpired(item, epochNow);
+                                }),
+                 pending_.end());
   if (pending_.size() != before) updateVisibleState();
 }
 
@@ -330,9 +377,11 @@ void ApprovalApp::updateVisibleState() {
     displayedId_ = pending_.front().id;
     state_ = State::Showing;
   }
-  if (displayedId_ != previousId) sendFailed_ = false;
-  if (displayedId_ != previousId || state_ == State::Showing) render();
-  else renderIdle();
+  if (displayedId_ != previousId) {
+    sendFailed_ = false;
+    displayChangedMs_ = clock_.millis();
+  }
+  render();
 }
 
 void ApprovalApp::handleButtons(uint32_t nowMs) {
@@ -348,6 +397,9 @@ void ApprovalApp::handleButtons(uint32_t nowMs) {
   }
   if (approve == reject) return;
   if (state_ != State::Showing || displayedId_.empty()) return;
+  if (static_cast<uint32_t>(nowMs - displayChangedMs_) < config_.inputGuardMs) {
+    return;
+  }
 
   const bool stillPending = containsPending(displayedId_);
   if (!stillPending) {
@@ -393,11 +445,16 @@ void ApprovalApp::sendDecision(bool approve, uint32_t nowMs) {
   }
 }
 
+// Buttons are handled before the sync so a press latched while the user was
+// looking at a request is applied to that request, not to whatever the sync
+// would put on screen in the same tick.
 void ApprovalApp::tick() {
   maintainMqtt();
   uint32_t nowMs = clock_.millis();
+  expireRequests();
+  handleButtons(nowMs);
+  nowMs = clock_.millis();
   performSync(nowMs);
-  expireRequests(nowMs);
 
   if (state_ == State::Done &&
       static_cast<int32_t>(nowMs - doneUntilMs_) >= 0) {
@@ -406,7 +463,6 @@ void ApprovalApp::tick() {
     requestSync();
     renderIdle();
   }
-  handleButtons(nowMs);
   powerPolicy_.tick(clock_.millis());
 }
 
@@ -416,19 +472,24 @@ void ApprovalApp::render() {
   } else if (state_ == State::Showing) {
     renderRequest();
   } else if (state_ == State::Sending) {
-    display_.clear();
-    display_.drawLines({"Sending..."});
+    draw({"Sending..."});
   } else {
-    display_.clear();
-    display_.drawLines({doneMessage_});
+    draw({doneMessage_});
   }
 }
 
-void ApprovalApp::renderIdle() {
+void ApprovalApp::draw(const std::vector<std::string>& lines) {
+  if (hasDrawn_ && lines == drawnLines_) return;
   display_.clear();
+  display_.drawLines(lines);
+  drawnLines_ = lines;
+  hasDrawn_ = true;
+}
+
+void ApprovalApp::renderIdle() {
   std::vector<std::string> lines{"roam-approve", "waiting..."};
   if (syncFailed_) lines.emplace_back("bridge err");
-  display_.drawLines(lines);
+  draw(lines);
 }
 
 void ApprovalApp::renderRequest() {
@@ -441,41 +502,42 @@ void ApprovalApp::renderRequest() {
     return;
   }
 
-  display_.clear();
   std::vector<std::string> lines;
-  std::string header = truncateUtf8(current->agent, 15) + " " +
+  std::string header = toDisplayText(current->agent, kAgentChars) + " " +
                        std::to_string(
                            static_cast<size_t>(current - pending_.begin()) + 1) +
                        "/" + std::to_string(pending_.size());
-  lines.push_back(truncateUtf8(header, 20));
-  lines.push_back(truncateUtf8(current->title, 20));
-  const size_t maxDetails = sendFailed_ ? 2 : 3;
+  lines.push_back(toDisplayText(header, kLineChars));
+  lines.push_back(toDisplayText(current->title, kLineChars));
+  const size_t maxDetails = sendFailed_ ? kMaxLines - 1 : kMaxLines;
   const size_t visibleDetails =
       std::min<size_t>(maxDetails, current->lines.size());
   for (size_t i = 0; i < visibleDetails; ++i) {
-    lines.push_back(truncateUtf8(current->lines[i], 20));
+    lines.push_back(toDisplayText(current->lines[i], kLineChars));
   }
   if (sendFailed_) lines.push_back("send failed, retry");
   lines.push_back("A:OK  B:NG");
-  display_.drawLines(lines);
+  draw(lines);
 }
 
-std::string ApprovalApp::truncateUtf8(const std::string& value,
-                                      size_t maxBytes) {
-  if (value.size() <= maxBytes) return value;
-  size_t end = maxBytes;
-  while (end > 0 &&
-         (static_cast<unsigned char>(value[end]) & 0xC0) == 0x80) {
-    --end;
+std::string ApprovalApp::toDisplayText(const std::string& value,
+                                       size_t maxChars) {
+  std::string out;
+  size_t i = 0;
+  while (i < value.size() && out.size() < maxChars) {
+    const unsigned char lead = static_cast<unsigned char>(value[i]);
+    size_t length = 1;
+    if ((lead & 0xE0) == 0xC0) length = 2;
+    else if ((lead & 0xF0) == 0xE0) length = 3;
+    else if ((lead & 0xF8) == 0xF0) length = 4;
+    if (lead < 0x80) {
+      out.push_back(lead < 0x20 || lead == 0x7F ? ' ' : static_cast<char>(lead));
+    } else {
+      out.push_back('?');
+    }
+    i += length;
   }
-  if (end == maxBytes) return value.substr(0, end);
-  const unsigned char lead = static_cast<unsigned char>(value[end]);
-  size_t sequenceLength = 1;
-  if ((lead & 0xE0) == 0xC0) sequenceLength = 2;
-  else if ((lead & 0xF0) == 0xE0) sequenceLength = 3;
-  else if ((lead & 0xF8) == 0xF0) sequenceLength = 4;
-  if (end + sequenceLength > maxBytes) return value.substr(0, end);
-  return value.substr(0, maxBytes);
+  return out;
 }
 
 bool ApprovalApp::parseIso8601(const std::string& value,

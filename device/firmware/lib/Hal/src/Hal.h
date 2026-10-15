@@ -8,8 +8,6 @@
 
 namespace hal {
 
-constexpr size_t kMaxHttpResponseBytes = 65536;
-
 class IDisplay {
  public:
   virtual ~IDisplay() = default;
@@ -38,13 +36,26 @@ class IMqtt {
   virtual void onMessage(MessageHandler handler) = 0;
 };
 
+// Satisfies ArduinoJson's custom reader contract so response bodies can be
+// parsed incrementally instead of being buffered in RAM.
+class IByteReader {
+ public:
+  virtual ~IByteReader() = default;
+  // Returns the next byte, or -1 at end of body / timeout.
+  virtual int read() = 0;
+  virtual size_t readBytes(char* buffer, size_t length) = 0;
+};
+
 class IHttp {
  public:
+  using BodyHandler = std::function<void(IByteReader& body)>;
+
   virtual ~IHttp() = default;
   virtual int postJson(const std::string& url, const std::string& bearer,
                        const std::string& body) = 0;
+  // onBody is invoked only for 2xx responses, before the connection closes.
   virtual int getJson(const std::string& url, const std::string& bearer,
-                      std::string& outBody) = 0;
+                      const BodyHandler& onBody) = 0;
 };
 
 class IPower {
