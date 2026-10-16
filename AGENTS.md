@@ -92,6 +92,7 @@ roam-approve/
 ```
 
 - parse: `tool_name` → title、`tool_input.command` / `file_path` → 画面幅(≒20 文字 × 6 行)に要約
+- デバイスのフォントは ASCII のみのため、parse で NFC 正規化後に連続した非 ASCII 部分を 1 つの目印に縮める: すべて日本語なら `<JA:n>`、それ以外(絵文字・全角英数などの紛らわしい文字を含む)は `<?:n>`(n はコードポイント数)。目印は行をまたいで分割しない。翻訳はしない(承認対象をそのまま見せるため)
 - render: approved → `{"decision":"approve"}`、rejected → `{"decision":"block","reason":"Rejected on M5StickC"}`、expired / Bridge 不達 → **何も出力せず exit 0**(通常プロンプトへフォールバック、安全側)
 - トークンと Bridge URL は環境変数 `ROAM_BRIDGE_URL` / `ROAM_AGENT_TOKEN`(hook は親プロセスの env を継承)
 

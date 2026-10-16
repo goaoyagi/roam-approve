@@ -1,4 +1,4 @@
-from roam_approve_adapters.devin_cli import DevinCliAdapter, summarize
+from roam_approve_adapters.devin_cli import DevinCliAdapter, summarize, to_ascii
 
 
 def parse(event):
@@ -110,7 +110,7 @@ def test_long_command_truncation() -> None:
     lines = summarize(long_cmd)
     assert len(lines) == 6
     assert all(len(line) <= 20 for line in lines)
-    assert lines[-1].endswith("…")
+    assert lines[-1].endswith("...")
 
 
 def test_multiline_overflow_keeps_six_with_ellipsis() -> None:
@@ -118,12 +118,66 @@ def test_multiline_overflow_keeps_six_with_ellipsis() -> None:
     lines = summarize(text)
     assert len(lines) == 6
     assert all(len(line) <= 20 for line in lines)
-    assert lines[-1].endswith("…")
+    assert lines[-1].endswith("...")
 
 
 def test_summarize_empty_lines_dropped_and_tabs() -> None:
     lines = summarize("a\n\n\tb\r\nc")
     assert lines == ["a", " b", "c"]
+
+
+def test_marker_is_never_split_across_lines() -> None:
+    lines = summarize('git commit -m "ログイン処理を修正"')
+    assert lines == ['git commit -m "', '<JA:9>"']
+    assert all(line.isascii() for line in lines)
+
+
+def test_japanese_file_path() -> None:
+    req = parse(
+        {
+            "tool_name": "write",
+            "session_id": "s",
+            "tool_input": {"file_path": "docs/設計メモ.md"},
+        }
+    )
+    assert req is not None
+    assert req.lines == ["docs/<JA:4>.md"]
+
+
+def test_multiple_runs_and_full_width_space_are_japanese() -> None:
+    assert to_ascii("echo 完了　です && ls 結果") == "echo <JA:5> && ls <JA:2>"
+
+
+def test_full_width_ascii_lookalike_is_flagged_as_unknown() -> None:
+    assert to_ascii("ｒｍ -rf /") == "<?:2> -rf /"
+
+
+def test_emoji_and_mixed_runs_are_flagged_as_unknown() -> None:
+    assert to_ascii("echo 👨‍👩‍👧") == "echo <?:5>"
+    assert to_ascii("echo 完了✅") == "echo <?:3>"
+
+
+def test_nfd_text_is_normalized_before_counting() -> None:
+    decomposed = "\u304b\u3099"
+    assert to_ascii(decomposed) == "<JA:1>"
+
+
+def test_control_characters_become_spaces() -> None:
+    assert to_ascii("a\x1bb\x7fc") == "a b c"
+
+
+def test_title_is_ascii_safe() -> None:
+    req = parse({"tool_name": "実行", "tool_input": {"command": "ls"}})
+    assert req is not None
+    assert req.title == "<JA:2>"
+
+
+def test_overflow_ellipsis_does_not_cut_marker() -> None:
+    text = "\n".join(["x"] * 5 + ["a" * 12 + "ログイン処理を修正です", "y"])
+    lines = summarize(text)
+    assert len(lines) == 6
+    assert lines[-1] == "a" * 12 + "..."
+    assert all(len(line) <= 20 and line.isascii() for line in lines)
 
 
 def test_render_approved() -> None:
