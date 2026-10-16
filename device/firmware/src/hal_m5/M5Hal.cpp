@@ -38,7 +38,9 @@ bool M5Buttons::wasPressedB() { return M5.BtnB.wasPressed(); }
 M5Mqtt::M5Mqtt() : client_(wifiClient_) {
   active_ = this;
   client_.setServer(MQTT_HOST, MQTT_PORT);
-  client_.setBufferSize(2048);
+  // PubSubClient silently drops messages larger than its buffer, which would
+  // lose the sync signal. The Bridge caps request payloads well below this.
+  client_.setBufferSize(4096);
   client_.setCallback(&M5Mqtt::receive);
 }
 
@@ -93,8 +95,9 @@ void M5Mqtt::receive(char* topic, uint8_t* payload, unsigned int length) {
 }
 
 void M5Http::addHeaders(HTTPClient& client, const std::string& bearer) {
-  client.setConnectTimeout(3000);
-  client.setTimeout(3000);
+  // The main loop (and button polling) blocks for the duration of a request.
+  client.setConnectTimeout(2000);
+  client.setTimeout(2000);
   client.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
   client.addHeader("Authorization", String("Bearer ") + bearer.c_str());
   client.addHeader("Content-Type", "application/json");
@@ -111,23 +114,44 @@ int M5Http::postJson(const std::string& url, const std::string& bearer,
 }
 
 int M5Http::getJson(const std::string& url, const std::string& bearer,
-                    std::string& outBody) {
-  outBody.clear();
+                    const BodyHandler& onBody) {
   HTTPClient client;
+  // HTTP/1.0 avoids chunked transfer encoding so getStream() is the raw body.
+  client.useHTTP10(true);
   if (!client.begin(url.c_str())) return -1;
   addHeaders(client, bearer);
   const int status = client.GET();
   if (status >= 200 && status < 300) {
-    const int contentLength = client.getSize();
-    if (contentLength > 0 &&
-        static_cast<size_t>(contentLength) > hal::kMaxHttpResponseBytes) {
-      client.end();
-      return -2;
-    }
-    outBody = client.getString().c_str();
+    StreamBodyReader body(client.getStream(), client.getSize());
+    onBody(body);
   }
   client.end();
   return status;
+}
+
+M5Http::StreamBodyReader::StreamBodyReader(Stream& stream, int contentLength)
+    : stream_(stream),
+      remaining_(contentLength),
+      bounded_(contentLength >= 0) {}
+
+int M5Http::StreamBodyReader::read() {
+  if (bounded_ && remaining_ <= 0) return -1;
+  char value;
+  if (stream_.readBytes(&value, 1) != 1) return -1;
+  if (bounded_) --remaining_;
+  return static_cast<unsigned char>(value);
+}
+
+size_t M5Http::StreamBodyReader::readBytes(char* buffer, size_t length) {
+  if (bounded_) {
+    if (remaining_ <= 0) return 0;
+    if (length > static_cast<size_t>(remaining_)) {
+      length = static_cast<size_t>(remaining_);
+    }
+  }
+  const size_t count = stream_.readBytes(buffer, length);
+  if (bounded_) remaining_ -= static_cast<int>(count);
+  return count;
 }
 
 void M5Power::setCpuMhz(uint32_t mhz) { setCpuFrequencyMhz(mhz); }

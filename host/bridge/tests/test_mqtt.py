@@ -6,8 +6,12 @@ from uuid import uuid4
 from paho.mqtt import client as mqtt
 from roam_approve_bridge.models import ApprovalRequest
 from roam_approve_bridge.notifier.base import (
+    PAYLOAD_LINE_CHARS,
+    PAYLOAD_MAX_LINES,
+    PAYLOAD_TITLE_CHARS,
     REQUEST_TOPIC_FILTER,
     RESOLVED_TOPIC,
+    request_payload,
     request_topic,
 )
 from roam_approve_bridge.notifier.mqtt import MqttNotifier
@@ -69,6 +73,24 @@ def test_mqtt_notifier_lifecycle_and_payloads(monkeypatch):
     }
     client.loop_stop.assert_called_once_with()
     client.disconnect.assert_called_once_with()
+
+
+def test_request_payload_fits_device_mqtt_buffer():
+    request = ApprovalRequest(
+        id=uuid4(),
+        agent="\u3042" * 64,
+        session_id="session-1",
+        title="\u3042" * 256,
+        lines=["\u3042" * 256] * 32,
+        timeout_s=300,
+    )
+
+    payload = request_payload(request)
+    encoded = json.dumps(payload).encode()
+
+    assert payload["title"] == "\u3042" * PAYLOAD_TITLE_CHARS
+    assert payload["lines"] == ["\u3042" * PAYLOAD_LINE_CHARS] * PAYLOAD_MAX_LINES
+    assert len(encoded) < 4096
 
 
 def test_stale_retained_request_is_cleared(monkeypatch):

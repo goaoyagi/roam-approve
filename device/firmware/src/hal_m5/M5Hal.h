@@ -50,9 +50,21 @@ class M5Http final : public hal::IHttp {
   int postJson(const std::string& url, const std::string& bearer,
                const std::string& body) override;
   int getJson(const std::string& url, const std::string& bearer,
-              std::string& outBody) override;
+              const BodyHandler& onBody) override;
 
  private:
+  class StreamBodyReader final : public hal::IByteReader {
+   public:
+    StreamBodyReader(Stream& stream, int contentLength);
+    int read() override;
+    size_t readBytes(char* buffer, size_t length) override;
+
+   private:
+    Stream& stream_;
+    int remaining_;
+    bool bounded_;
+  };
+
   static void addHeaders(HTTPClient& client, const std::string& bearer);
 };
 
