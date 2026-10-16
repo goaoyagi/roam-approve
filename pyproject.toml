@@ -8,10 +8,15 @@ members = ["host/bridge", "host/adapters"]
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"
+markers = [
+    "integration: needs a live MQTT broker (skip when unreachable)",
+    "e2e: full end-to-end path with mosquitto, Bridge, and fake device",
+]
 
 [dependency-groups]
 dev = [
     "pytest>=8",
     "httpx>=0.27",
     "ruff>=0.6",
+    "paho-mqtt>=2.0",
 ]
