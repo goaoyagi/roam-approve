@@ -28,6 +28,7 @@ roam-approve/
 │   ├── bridge/                      # FastAPI Bridge Server(uv workspace member)
 │   │   ├── src/roam_approve_bridge/ # main.py / api.py / auth.py / models.py / store.py / config.py / notifier/
 │   │   └── tests/                   # pytest + httpx。notifier=memory で HW/MQTT 不要
+│   │       └── integration/         # 実 mosquitto 結合(@pytest.mark.integration、未起動時 skip)
 │   └── adapters/                    # エージェント別アダプタ(hook から呼ばれる軽量 CLI、stdlib のみ)
 │       ├── src/roam_approve_adapters/ # cli.py / client.py / base.py / registry.py / devin_cli.py
 │       ├── examples/devin-cli/hooks.v1.json
@@ -43,7 +44,7 @@ roam-approve/
 │       └── include/config.example.h # → config.h にコピー(config.h は gitignore)
 ├── tools/
 │   ├── gen_tokens.sh / check_secrets.sh
-│   └── e2e/
+│   └── e2e/                         # fake_device.py + test_e2e.py (@pytest.mark.e2e)
 ├── infra/mosquitto/mosquitto.conf   # LAN 内匿名。TLS/認証雛形はコメント
 └── docker-compose.yml               # mosquitto (+ bridge は profile 指定)
 ```
@@ -60,7 +61,9 @@ roam-approve/
 | `make fw-build` | `pio run -e m5stickc-plus-se` | pio |
 | `make fw-test` | `pio test -e native`(HAL モック) | pio |
 | `make fw-upload` | 実機書き込み | pio |
-| `make e2e` / `make sim` | E2E / フェイクデバイス(未実装、GitHub Issues 参照) | — |
+| `make sim` | フェイクデバイス(`tools/e2e/fake_device.py`)。`ARGS='--auto approve'` 可 | uv, mosquitto, Bridge |
+| `make e2e` | hook → Bridge → MQTT → fake device の E2E | uv, docker |
+| `make integration` | Bridge + 実 mosquitto 結合テスト(`pytest -m integration`) | uv, docker |
 | `make gen-tokens` | `.env` にトークン生成(値は表示しない) | openssl |
 | `make check-secrets` | 追跡ファイルのシークレット確認 + gitleaks | gitleaks |
 

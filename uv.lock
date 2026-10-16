@@ -560,6 +560,7 @@ source = { virtual = "." }
 [package.dev-dependencies]
 dev = [
     { name = "httpx" },
+    { name = "paho-mqtt" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -569,6 +570,7 @@ dev = [
 [package.metadata.requires-dev]
 dev = [
     { name = "httpx", specifier = ">=0.27" },
+    { name = "paho-mqtt", specifier = ">=2.0" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.6" },
 ]
