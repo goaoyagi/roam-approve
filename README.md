@@ -40,9 +40,11 @@ make bridge                # Bridge を 127.0.0.1:8000 で起動
 
 ```sh
 cp device/firmware/include/config.example.h device/firmware/include/config.h
-# config.h に Wi-Fi / MQTT_HOST / BRIDGE_URL / DEVICE_TOKEN を記入
+# config.h に Wi-Fi / MQTT_HOST / MQTT_PORT / BRIDGE_URL / DEVICE_TOKEN を記入
 cd device/firmware && pio run -e m5stickc-plus-se -t upload
 ```
+
+ファームウェアは `device/firmware/lib/ApprovalApp` の純粋 C++ ロジックと M5StickC 用 HAL で構成され、`make fw-test` で native テストを実行できます。匿名 MQTT は更新の合図としてのみ扱い、表示・承認対象は device トークン付き HTTP 同期で取得した pending 一覧に限定します。Wi-Fi 情報と device token は gitignore 済みの `include/config.h` にだけ設定してください。
 
 ## Using with Devin CLI/Desktop
 
@@ -80,7 +82,7 @@ cd device/firmware && pio run -e m5stickc-plus-se -t upload
 | 1 | スキャフォールド + セキュリティ設定 + CI | 完了 |
 | 2 | Bridge 実装 + pytest | 完了 |
 | 3 | Adapters(devin-cli) + hooks 設定例 | 完了 |
-| 4 | Firmware(ApprovalApp + native テスト + M5 HAL) | 未着手 (Issue 参照) |
+| 4 | Firmware(ApprovalApp + native テスト + M5 HAL) | 実装済み (実機検証は Step 6) |
 | 5 | フェイクデバイス + E2E | 未着手 (Issue 参照) |
 | 6 | 実機検証 + README 仕上げ | 未着手 (Issue 参照) |
 
