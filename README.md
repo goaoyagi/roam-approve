@@ -166,6 +166,7 @@ CLI と Desktop は同じ `PermissionRequest` hook 経路です。
 
    - **CLI** (シェルで env を export できる場合): `host/adapters/examples/devin-cli/hooks.v1.json` をコピーし、`ROAM_BRIDGE_URL` / `ROAM_AGENT_TOKEN` / `ROAM_WAIT_S` を親プロセスに設定
    - **Desktop** (GUI は login-shell の env を引き継がない): このリポジトリ同様 `bash tools/devin_desktop_hook.sh` を呼ぶ hooks にする(ラッパーがリポジトリの `.env` を読んで hook を起動)
+     - **他プロジェクトで使う場合**は、コピー先の `.devin/hooks.v1.json` で `command` を `bash /path/to/roam-approve/tools/devin_desktop_hook.sh` のように **絶対パス**にする(ラッパーは自身の位置から roam-approve の `.env` を読むので、利用プロジェクト側にトークンを置く必要はない)。このリポジトリ自身は相対パスのままにしておく(ローカルパスをコミットしないため)
 
    | 変数 | 内容 |
    |---|---|
