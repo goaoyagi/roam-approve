@@ -83,7 +83,7 @@ cd device/firmware && pio run -e m5stickc-plus-se -t upload
 | 2 | Bridge 実装 + pytest | 完了 |
 | 3 | Adapters(devin-cli) + hooks 設定例 | 完了 |
 | 4 | Firmware(ApprovalApp + native テスト + M5 HAL) | 実装済み (実機検証は Step 6) |
-| 5 | フェイクデバイス + E2E | 未着手 (Issue 参照) |
+| 5 | フェイクデバイス + E2E | 完了 (`make sim` / `make e2e` / `make integration`) |
 | 6 | 実機検証 + README 仕上げ | 未着手 (Issue 参照) |
 
 ## Security notes

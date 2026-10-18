@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help install up down bridge test lint fw-build fw-test fw-upload sim e2e gen-tokens check-secrets
+.PHONY: help install up down bridge test lint fw-build fw-test fw-upload sim e2e integration gen-tokens check-secrets
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -17,8 +17,8 @@ down: ## Stop docker compose services
 bridge: ## Run the Bridge locally (binds 127.0.0.1:8000 by default)
 	uv run uvicorn roam_approve_bridge.main:app --host $${ROAM_BIND:-127.0.0.1} --port $${ROAM_PORT:-8000}
 
-test: ## Run host tests and the secrets check
-	uv run pytest host
+test: ## Run host tests and the secrets check (no MQTT broker required)
+	uv run pytest host -m "not integration"
 	$(MAKE) check-secrets
 
 lint: ## Ruff check on host/ and tools/
@@ -33,11 +33,16 @@ fw-test: ## Run native firmware tests (requires pio)
 fw-upload: ## Flash firmware to device (requires pio)
 	cd device/firmware && pio run -e m5stickc-plus-se -t upload
 
-sim: ## Fake device simulator
-	@echo "TODO: not implemented yet (see GitHub issues)"; exit 1
+sim: ## Fake device simulator (ROAM_DEVICE_TOKEN required; --auto approve|reject optional)
+	uv run python tools/e2e/fake_device.py $(ARGS)
 
-e2e: ## End-to-end test
-	@echo "TODO: not implemented yet (see GitHub issues)"; exit 1
+integration: ## Bridge + real mosquitto integration tests
+	docker compose up -d mosquitto
+	uv run pytest host/bridge/tests/integration -m integration
+
+e2e: ## End-to-end test (mosquitto + Bridge + fake device + hook)
+	docker compose up -d mosquitto
+	uv run pytest tools/e2e -m e2e
 
 gen-tokens: ## Generate agent/device tokens into .env (never prints values)
 	tools/gen_tokens.sh
