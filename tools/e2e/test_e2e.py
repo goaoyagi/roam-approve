@@ -16,7 +16,7 @@ _E2E_DIR = Path(__file__).resolve().parent
 if str(_E2E_DIR) not in sys.path:
     sys.path.insert(0, str(_E2E_DIR))
 
-from helpers import run_hook, sample_event, start_fake_device
+from helpers import find_request_by_session, run_hook, sample_event, start_fake_device
 
 pytestmark = pytest.mark.e2e
 
@@ -47,9 +47,17 @@ def test_hook_reject_via_fake_device(e2e_stack):
 
 def test_hook_timeout_produces_no_stdout(e2e_stack):
     # No fake device: wait until ROAM_WAIT_S elapses, then fall back silently.
-    result = run_hook(e2e_stack, sample_event("echo timeout-me"), wait_s=2, timeout=30)
+    # Also assert Bridge-side state so a stray device on the shared broker
+    # cannot silently approve and make an empty-stdout check meaningless.
+    event = sample_event("echo timeout-me")
+    result = run_hook(e2e_stack, event, wait_s=2, timeout=30)
     assert result.returncode == 0, result.stderr.decode()
     assert result.stdout == b""
+
+    recorded = find_request_by_session(e2e_stack, event["session_id"])
+    assert recorded is not None, "Bridge never recorded the timeout request"
+    assert recorded.get("decided_by") is None
+    assert recorded["status"] not in {"approved", "rejected"}
 
 
 def test_fake_mqtt_payload_is_not_approved(e2e_stack):
@@ -88,6 +96,13 @@ def test_fake_mqtt_payload_is_not_approved(e2e_stack):
             assert response.status_code == 200
             pending_ids = {item["id"] for item in response.json()}
             assert fake_id not in pending_ids
+
+            # Fake MQTT content must never appear on the device "display".
+            display = device.output_text()
+            assert f"pending id={fake_id}" not in display
+            assert "title='fake'" not in display
+            assert 'title="fake"' not in display
+            assert "rm -rf /" not in display
 
             # A real hook request must still be approved from HTTP state.
             result = run_hook(e2e_stack, sample_event("echo real-after-fake"), wait_s=30)

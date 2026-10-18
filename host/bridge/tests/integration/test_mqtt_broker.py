@@ -27,8 +27,8 @@ def test_create_delivers_retained_request(bridge, observer):
     # Wait for the always-on observer first (may be live or retained).
     observer.wait_for_request(request_id)
     retained = fetch_retained(request_id)
-    assert retained is not None and retained != b""
-    payload = json.loads(retained.decode())
+    assert retained.is_present()
+    payload = json.loads(retained.payload.decode())
     assert payload["id"] == request_id
     assert payload["title"] == "retained-check"
     assert payload["agent"] == "devin-cli"
@@ -47,11 +47,11 @@ def test_resolving_one_request_keeps_other_retained(bridge, observer):
     observer.wait_for_resolved(second, "rejected")
 
     retained_first = fetch_retained(first)
-    assert retained_first is not None and retained_first != b""
-    assert json.loads(retained_first.decode())["id"] == first
+    assert retained_first.is_present()
+    assert json.loads(retained_first.payload.decode())["id"] == first
 
     retained_second = fetch_retained(second)
-    assert retained_second in (None, b"")
+    assert retained_second.is_cleared(), retained_second
 
 
 def test_resolve_and_expire_clear_retained_and_publish_resolved(bridge, observer):
@@ -61,7 +61,7 @@ def test_resolve_and_expire_clear_retained_and_publish_resolved(bridge, observer
     decide_request(bridge, approved_id, "approve")
     observer.wait_for_clear(approved_id)
     observer.wait_for_resolved(approved_id, "approved")
-    assert fetch_retained(approved_id) in (None, b"")
+    assert fetch_retained(approved_id).is_cleared()
 
     # Short-lived request: do not call HTTP after create so only the sweeper
     # can expire it (store.get/list/wait/decide also expire-on-read).
@@ -70,7 +70,7 @@ def test_resolve_and_expire_clear_retained_and_publish_resolved(bridge, observer
     observer.wait_for_request(expired_id)
     observer.wait_for_clear(expired_id, timeout=10.0)
     observer.wait_for_resolved(expired_id, "expired", timeout=10.0)
-    assert fetch_retained(expired_id) in (None, b"")
+    assert fetch_retained(expired_id).is_cleared()
 
 
 def test_bridge_restart_clears_stale_retained(bridge, observer):
@@ -78,12 +78,12 @@ def test_bridge_restart_clears_stale_retained(bridge, observer):
     observer.clear()
     request_id = create_request(bridge, title="stale-after-restart")
     observer.wait_for_request(request_id)
-    assert fetch_retained(request_id) not in (None, b"")
+    assert fetch_retained(request_id).is_present()
 
     port = bridge.port
     bridge.stop()
     # Retained must still be present while only Bridge is down.
-    assert fetch_retained(request_id) not in (None, b"")
+    assert fetch_retained(request_id).is_present()
 
     restarted = start_bridge(port=port)
     try:
@@ -92,7 +92,7 @@ def test_bridge_restart_clears_stale_retained(bridge, observer):
             timeout=10.0,
             description="stale retained clear after restart",
         )
-        assert fetch_retained(request_id) in (None, b"")
+        assert fetch_retained(request_id).is_cleared()
     finally:
         restarted.stop()
 
@@ -125,18 +125,19 @@ def test_bridge_starts_without_broker_and_reconnects(require_broker, observer):
         # paho reconnects asynchronously; wait until publish is observed.
         deadline = time.monotonic() + 20.0
         last_error: Exception | None = None
-        request_id = None
+        observed_id: str | None = None
         while time.monotonic() < deadline:
             try:
                 observer.clear()
                 request_id = create_request(bridge, title="after-reconnect")
                 observer.wait_for_request(request_id, timeout=3.0)
+                observed_id = request_id
                 break
             except Exception as error:  # noqa: BLE001 - retry until MQTT reconnects
                 last_error = error
                 time.sleep(0.5)
-        assert request_id is not None, f"MQTT did not recover: {last_error}"
-        assert fetch_retained(request_id) not in (None, b"")
+        assert observed_id is not None, f"MQTT did not recover: {last_error}"
+        assert fetch_retained(observed_id).is_present()
     finally:
         if bridge is not None:
             bridge.stop()

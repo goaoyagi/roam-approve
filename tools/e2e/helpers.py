@@ -7,9 +7,10 @@ import os
 import signal
 import socket
 import subprocess
+import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import httpx
@@ -49,9 +50,49 @@ def ensure_mosquitto() -> None:
 class ManagedProc:
     process: subprocess.Popen[str]
     name: str
+    output_lines: list[str] = field(default_factory=list)
+    _reader: threading.Thread | None = field(default=None, repr=False)
+
+    @classmethod
+    def spawn(
+        cls,
+        args: list[str],
+        *,
+        name: str,
+        env: dict[str, str],
+        cwd: Path,
+    ) -> ManagedProc:
+        process = subprocess.Popen(
+            args,
+            env=env,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        managed = cls(process=process, name=name)
+        if process.stdout is not None:
+            managed._reader = threading.Thread(
+                target=managed._drain_stdout,
+                name=f"{name}-stdout",
+                daemon=True,
+            )
+            managed._reader.start()
+        return managed
+
+    def _drain_stdout(self) -> None:
+        assert self.process.stdout is not None
+        for line in self.process.stdout:
+            self.output_lines.append(line)
+
+    def output_text(self) -> str:
+        return "".join(self.output_lines)
 
     def stop(self) -> None:
         if self.process.poll() is not None:
+            if self._reader is not None:
+                self._reader.join(timeout=2)
             return
         self.process.send_signal(signal.SIGTERM)
         try:
@@ -59,6 +100,8 @@ class ManagedProc:
         except subprocess.TimeoutExpired:
             self.process.kill()
             self.process.wait(timeout=5)
+        if self._reader is not None:
+            self._reader.join(timeout=2)
 
 
 @dataclass
@@ -84,6 +127,12 @@ class E2EEnv:
         env.update(extra)
         return env
 
+    def device_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.device_token}"}
+
+    def agent_headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.agent_token}"}
+
 
 def start_bridge() -> tuple[ManagedProc, str]:
     port = free_port()
@@ -101,27 +150,22 @@ def start_bridge() -> tuple[ManagedProc, str]:
             "ROAM_PORT": str(port),
         }
     )
-    bridge = ManagedProc(
-        subprocess.Popen(
-            [
-                "uv",
-                "run",
-                "--project",
-                str(REPO_ROOT),
-                "uvicorn",
-                "roam_approve_bridge.main:app",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(port),
-            ],
-            cwd=tmp_cwd,
-            env=bridge_env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        ),
+    bridge = ManagedProc.spawn(
+        [
+            "uv",
+            "run",
+            "--project",
+            str(REPO_ROOT),
+            "uvicorn",
+            "roam_approve_bridge.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
         name="bridge",
+        env=bridge_env,
+        cwd=tmp_cwd,
     )
     base_url = f"http://127.0.0.1:{port}"
     deadline = time.monotonic() + 20
@@ -134,8 +178,7 @@ def start_bridge() -> tuple[ManagedProc, str]:
         except Exception as error:  # noqa: BLE001 - poll until ready
             last_error = error
         if bridge.process.poll() is not None:
-            output = bridge.process.stdout.read() if bridge.process.stdout else ""
-            raise RuntimeError(f"Bridge exited early: {output}")
+            raise RuntimeError(f"Bridge exited early: {bridge.output_text()}")
         time.sleep(0.1)
     bridge.stop()
     raise RuntimeError(f"Bridge failed to become healthy: {last_error}")
@@ -168,25 +211,20 @@ def run_hook(
 
 
 def start_fake_device(env: E2EEnv, *, auto: str) -> ManagedProc:
-    return ManagedProc(
-        subprocess.Popen(
-            [
-                "uv",
-                "run",
-                "--project",
-                str(env.repo_root),
-                "python",
-                str(env.repo_root / "tools/e2e/fake_device.py"),
-                "--auto",
-                auto,
-            ],
-            env=env.hook_env(),
-            cwd=env.repo_root,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        ),
+    return ManagedProc.spawn(
+        [
+            "uv",
+            "run",
+            "--project",
+            str(env.repo_root),
+            "python",
+            str(env.repo_root / "tools/e2e/fake_device.py"),
+            "--auto",
+            auto,
+        ],
         name=f"fake-device-{auto}",
+        env=env.hook_env(),
+        cwd=env.repo_root,
     )
 
 
@@ -196,3 +234,18 @@ def sample_event(command: str = "ls -la") -> dict:
         "session_id": f"e2e-{uuid.uuid4()}",
         "tool_input": {"command": command},
     }
+
+
+def find_request_by_session(env: E2EEnv, session_id: str) -> dict | None:
+    response = httpx.get(
+        f"{env.bridge_url}/v1/requests",
+        headers=env.device_headers(),
+        timeout=5.0,
+    )
+    assert response.status_code == 200, response.text
+    matches = [
+        item for item in response.json() if item.get("session_id") == session_id
+    ]
+    if not matches:
+        return None
+    return matches[0]

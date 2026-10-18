@@ -9,6 +9,7 @@ import subprocess
 import time
 import uuid
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -143,12 +144,40 @@ class MqttObserver:
         )
 
 
-def fetch_retained(request_id: str, *, timeout: float = 5.0) -> bytes | None:
-    """Connect fresh and return the retained payload for a request topic."""
-    topic = request_topic(request_id)
+class RetainedKind(Enum):
+    PRESENT = "present"
+    EMPTY = "empty"
+    ABSENT = "absent"
+    TIMED_OUT = "timed_out"
+
+
+@dataclass(frozen=True)
+class RetainedFetch:
+    kind: RetainedKind
+    payload: bytes | None = None
+
+    def is_present(self) -> bool:
+        return self.kind is RetainedKind.PRESENT and bool(self.payload)
+
+    def is_cleared(self) -> bool:
+        return self.kind in {RetainedKind.ABSENT, RetainedKind.EMPTY}
+
+
+def fetch_retained(request_id: str, *, timeout: float = 5.0) -> RetainedFetch:
+    """Fetch retained payload, distinguishing absent from subscribe/comms timeout.
+
+    Waits for SUBACK, proves broker round-trip on a probe topic, then observes
+    the request topic. No retained delivery after a healthy probe means ABSENT
+    (cleared / never set), not a silent transport failure.
+    """
     import threading
 
-    got = threading.Event()
+    topic = request_topic(request_id)
+    probe_topic = f"roam/approval/test-probe/{uuid.uuid4()}"
+    probe_payload = b"ping"
+    subscribed = threading.Event()
+    probe_seen = threading.Event()
+    retained_seen = threading.Event()
     holder: dict[str, bytes | None] = {"payload": None}
     client = mqtt.Client(
         callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
@@ -156,21 +185,44 @@ def fetch_retained(request_id: str, *, timeout: float = 5.0) -> bytes | None:
     )
 
     def on_connect(client, userdata, flags, reason_code, properties) -> None:
-        client.subscribe(topic, qos=1)
+        client.subscribe([(topic, 1), (probe_topic, 1)])
+
+    def on_subscribe(client, userdata, mid, reason_codes, properties) -> None:
+        subscribed.set()
 
     def on_message(client, userdata, message) -> None:
+        if message.topic == probe_topic and bytes(message.payload) == probe_payload:
+            probe_seen.set()
+            return
         if message.topic == topic and message.retain:
             holder["payload"] = bytes(message.payload)
-            got.set()
+            retained_seen.set()
 
     client.on_connect = on_connect
+    client.on_subscribe = on_subscribe
     client.on_message = on_message
     client.connect("127.0.0.1", 1883, keepalive=30)
     client.loop_start()
     try:
-        if not got.wait(timeout=timeout):
-            return None
-        return holder["payload"]
+        if not subscribed.wait(timeout=timeout):
+            return RetainedFetch(RetainedKind.TIMED_OUT)
+        # Prove the session can publish and receive before concluding ABSENT.
+        client.publish(probe_topic, probe_payload, qos=1, retain=False)
+        if not probe_seen.wait(timeout=timeout):
+            return RetainedFetch(RetainedKind.TIMED_OUT)
+        # Retained is delivered on subscribe; allow a short quiet window after
+        # the probe confirms the session is healthy.
+        quiet_deadline = time.monotonic() + min(timeout, 1.0)
+        while time.monotonic() < quiet_deadline:
+            if retained_seen.is_set():
+                break
+            time.sleep(0.05)
+        if not retained_seen.is_set():
+            return RetainedFetch(RetainedKind.ABSENT)
+        payload = holder["payload"]
+        if payload == b"":
+            return RetainedFetch(RetainedKind.EMPTY, b"")
+        return RetainedFetch(RetainedKind.PRESENT, payload)
     finally:
         client.loop_stop()
         client.disconnect()

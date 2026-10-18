@@ -32,6 +32,20 @@ def _env(name: str, default: str | None = None) -> str:
     return value
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects so the Authorization header is never re-sent."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect)
+
+
+class BridgeUnavailable(Exception):
+    """Bridge could not be reached or returned an unusable response."""
+
+
 class BridgeHttp:
     def __init__(self, base_url: str, token: str) -> None:
         self._base = base_url.rstrip("/")
@@ -51,7 +65,7 @@ class BridgeHttp:
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with _OPENER.open(req, timeout=10) as resp:
                 raw = resp.read().decode()
                 payload = json.loads(raw) if raw else None
                 return resp.status, payload
@@ -62,20 +76,29 @@ class BridgeHttp:
             except json.JSONDecodeError:
                 payload = raw
             return error.code, payload
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as error:
+            raise BridgeUnavailable(str(error)) from error
 
     def list_pending(self) -> list[dict]:
+        """Return pending requests, or raise BridgeUnavailable on sync failure."""
         status, payload = self._request("GET", "/v1/requests?status=pending")
         if status != 200 or not isinstance(payload, list):
-            print(f"fake-device: list pending failed: HTTP {status}", file=sys.stderr)
-            return []
+            raise BridgeUnavailable(f"list pending failed: HTTP {status}")
         return [item for item in payload if isinstance(item, dict)]
 
     def decide(self, request_id: str, decision: Literal["approve", "reject"]) -> bool:
-        status, _payload = self._request(
-            "POST",
-            f"/v1/requests/{request_id}/decision",
-            {"decision": decision, "source": "fake-device"},
-        )
+        try:
+            status, _payload = self._request(
+                "POST",
+                f"/v1/requests/{request_id}/decision",
+                {"decision": decision, "source": "fake-device"},
+            )
+        except BridgeUnavailable as error:
+            print(
+                f"fake-device: decision {decision} for {request_id} failed: {error}",
+                file=sys.stderr,
+            )
+            return False
         if status != 200:
             print(
                 f"fake-device: decision {decision} for {request_id} failed: HTTP {status}",
@@ -126,13 +149,19 @@ class FakeDevice:
         self._client.loop_stop()
         self._client.disconnect()
 
-    def sync(self) -> None:
-        pending = self._bridge.list_pending()
+    def sync(self) -> bool:
+        """Refresh pending from Bridge. On failure keep prior state and return False."""
+        try:
+            pending = self._bridge.list_pending()
+        except BridgeUnavailable as error:
+            print(f"fake-device: sync failed ({error}); keeping previous state", flush=True)
+            return False
         with self._lock:
             self._pending = {
                 str(item["id"]): item for item in pending if "id" in item
             }
         self._render()
+        return True
 
     def _render(self) -> None:
         with self._lock:
@@ -149,7 +178,10 @@ class FakeDevice:
                 flush=True,
             )
         if self._mode == "interactive":
-            print("fake-device: press a=approve, r=reject, q=quit", flush=True)
+            print(
+                "fake-device: type a=approve, r=reject, q=quit then Enter",
+                flush=True,
+            )
 
     def _auto_decide(self) -> None:
         if self._mode == "interactive":
@@ -165,14 +197,17 @@ class FakeDevice:
         self.sync()
 
     def _interactive_once(self) -> bool:
-        """Handle one keypress. Returns False when the device should stop."""
+        """Handle one line of input. Returns False when the device should stop."""
         if not sys.stdin.isatty():
             time.sleep(0.2)
             return True
         ready, _, _ = select.select([sys.stdin], [], [], 0.2)
         if not ready:
             return True
-        key = sys.stdin.read(1).lower()
+        line = sys.stdin.readline()
+        if not line:
+            return True
+        key = line.strip().lower()[:1]
         if key == "q":
             return False
         if key not in {"a", "r"}:
@@ -198,7 +233,8 @@ class FakeDevice:
                 self._wake.clear()
                 if self._stop.is_set():
                     break
-                self.sync()
+                if not self.sync():
+                    continue
                 if self._mode == "interactive":
                     if not self._interactive_once():
                         break
