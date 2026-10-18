@@ -120,7 +120,7 @@ export DOCKER_HOST="unix://${HOME}/.colima/docker.sock"
    | 定数 | 内容 |
    |---|---|
    | `WIFI_SSID` / `WIFI_PASSWORD` | 実機が乗る Wi-Fi |
-   | `MQTT_HOST` | PC の LAN IP(例 `192.168.1.122`)。`127.0.0.1` は不可 |
+   | `MQTT_HOST` | PC の LAN IP(例 `192.168.x.x`)。`127.0.0.1` は不可 |
    | `MQTT_PORT` | 通常 `1883` |
    | `BRIDGE_URL` | `http://<同じ LAN IP>:8000` |
    | `DEVICE_TOKEN` | `.env` の `ROAM_DEVICE_TOKEN` と同じ値 |
