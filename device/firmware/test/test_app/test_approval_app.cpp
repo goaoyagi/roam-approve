@@ -539,6 +539,41 @@ void test_sync_failure_shows_error_and_retries() {
   TEST_ASSERT_EQUAL(2, fixture.http.getCalls);
 }
 
+
+void test_bridge_shaped_pending_list_is_shown() {
+  Fixture fixture;
+  fixture.clock.epoch = 0;  // no wall clock
+  fixture.http.getBody =
+      "[{\"id\":\"3c351d3c-ee01-43c0-9eca-86321308bc63\",\"agent\":\"devin-cli\","
+      "\"session_id\":\"step6-2\",\"title\":\"SHOW THIS\",\"lines\":[\"line-one\","
+      "\"line-two\"],\"timeout_s\":300,\"created_at\":\"2026-10-18T11:49:16.015828Z\","
+      "\"status\":\"pending\",\"decided_by\":null,"
+      "\"expires_at\":\"2026-10-18T11:54:16.015828Z\"}]";
+  fixture.app.begin();
+  fixture.app.tick();
+  TEST_ASSERT_FALSE(fixture.app.lastSyncFailed());
+  TEST_ASSERT_EQUAL_STRING("3c351d3c-ee01-43c0-9eca-86321308bc63",
+                           fixture.app.displayedId().c_str());
+  TEST_ASSERT_TRUE(fixture.display.sawText("SHOW THIS"));
+  TEST_ASSERT_TRUE(fixture.display.sawText("line-one"));
+}
+
+void test_false_local_expiry_does_not_stick_across_syncs() {
+  Fixture fixture;
+  // Far-future wall clock incorrectly treats the request as expired.
+  fixture.clock.epoch = 2000000000;
+  fixture.http.getBody = requestJson();
+  fixture.start();
+  TEST_ASSERT_EQUAL(ApprovalApp::State::Idle, fixture.app.state());
+  TEST_ASSERT_TRUE(fixture.app.displayedId().empty());
+
+  // Once the clock is trusted again (or unset), Bridge pending must reappear.
+  fixture.clock.epoch = 0;
+  fixture.syncAfterSignal("roam/approval/request/" + std::string(kId1), "{}");
+  TEST_ASSERT_EQUAL(ApprovalApp::State::Showing, fixture.app.state());
+  TEST_ASSERT_EQUAL_STRING(kId1, fixture.app.displayedId().c_str());
+}
+
 void test_iso8601_parser() {
   int64_t epoch = 0;
   TEST_ASSERT_TRUE(
@@ -712,6 +747,8 @@ int main() {
   RUN_TEST(test_mqtt_burst_is_debounced_to_one_trailing_sync);
   RUN_TEST(test_mqtt_reconnect_subscribes_and_syncs);
   RUN_TEST(test_sync_failure_shows_error_and_retries);
+  RUN_TEST(test_bridge_shaped_pending_list_is_shown);
+  RUN_TEST(test_false_local_expiry_does_not_stick_across_syncs);
   RUN_TEST(test_iso8601_parser);
   RUN_TEST(test_display_text_counts_code_points_and_masks_non_ascii);
   RUN_TEST(test_press_is_applied_to_request_seen_before_sync);

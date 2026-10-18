@@ -6,6 +6,8 @@
 #include <ctime>
 #include <string>
 
+#include "esp_sntp.h"
+
 #if __has_include("../../include/config.h")
 #include "../../include/config.h"
 #endif
@@ -161,6 +163,11 @@ void M5Power::setWifiSleep(bool enabled) { WiFi.setSleep(enabled); }
 uint32_t M5Clock::millis() const { return ::millis(); }
 
 int64_t M5Clock::epochSeconds() const {
+  // M5 RTC can load a bogus wall clock before SNTP finishes; treating that as
+  // authoritative marks still-pending Bridge requests as locally expired.
+  if (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED) {
+    return 0;
+  }
   const time_t now = time(nullptr);
   return now > 1600000000 ? static_cast<int64_t>(now) : 0;
 }

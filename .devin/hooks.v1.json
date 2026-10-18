@@ -1,0 +1,14 @@
+{
+  "PermissionRequest": [
+    {
+      "matcher": "^(exec|write|edit)$",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash tools/devin_desktop_hook.sh",
+          "timeout": 300
+        }
+      ]
+    }
+  ]
+}

@@ -5,6 +5,11 @@
       "Write(.env*)",
       "Read(**/include/config.h)",
       "Write(**/include/config.h)"
+    ],
+    "ask": [
+      "exec",
+      "write",
+      "edit"
     ]
   }
 }

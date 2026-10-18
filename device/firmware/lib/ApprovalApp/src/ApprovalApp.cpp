@@ -302,11 +302,12 @@ void ApprovalApp::collectPending(const JsonDocument& element, int64_t epochNow,
   const char* id = element["id"] | static_cast<const char*>(nullptr);
   if (id == nullptr || !isValidId(id)) return;
   responseIds.emplace_back(id);
-  if (next.size() >= kMaxPendings ||
-      std::find(locallyExpiredIds_.begin(), locallyExpiredIds_.end(), id) !=
-          locallyExpiredIds_.end()) {
-    return;
-  }
+  if (next.size() >= kMaxPendings) return;
+  // Bridge pending list is authoritative. Drop a prior local-expiry guess so a
+  // bad RTC reading cannot hide the same id forever across syncs.
+  locallyExpiredIds_.erase(
+      std::remove(locallyExpiredIds_.begin(), locallyExpiredIds_.end(), id),
+      locallyExpiredIds_.end());
   const char* agent = element["agent"] | static_cast<const char*>(nullptr);
   const char* title = element["title"] | static_cast<const char*>(nullptr);
   const char* expires = element["expires_at"] | static_cast<const char*>(nullptr);
