@@ -32,15 +32,18 @@ def test_hook_approve_via_fake_device(e2e_stack):
         device.stop()
 
 
-def test_hook_reject_via_fake_device(e2e_stack):
+def test_hook_reject_via_fake_device_falls_back_to_prompt(e2e_stack):
     device = start_fake_device(e2e_stack, auto="reject")
     try:
         time.sleep(1.0)
-        result = run_hook(e2e_stack, sample_event("echo reject-me"), wait_s=30)
+        event = sample_event("echo reject-me")
+        result = run_hook(e2e_stack, event, wait_s=30)
         assert result.returncode == 0, result.stderr.decode()
-        assert result.stdout == (
-            b'{"decision":"block","reason":"Rejected on M5StickC"}\n'
-        )
+        assert result.stdout == b""
+
+        recorded = find_request_by_session(e2e_stack, event["session_id"])
+        assert recorded is not None, "Bridge never recorded the reject request"
+        assert recorded["status"] == "rejected"
     finally:
         device.stop()
 

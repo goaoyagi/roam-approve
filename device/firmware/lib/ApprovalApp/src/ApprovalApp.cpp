@@ -429,7 +429,7 @@ void ApprovalApp::sendDecision(bool approve, uint32_t nowMs) {
 
   if (status == 200) {
     erasePending(id);
-    doneMessage_ = approve ? "Approved" : "Rejected";
+    doneMessage_ = approve ? "Approved" : "Sent to PC";
     state_ = State::Done;
     doneUntilMs_ = nowMs + config_.doneDisplayMs;
     render();
@@ -517,7 +517,7 @@ void ApprovalApp::renderRequest() {
     lines.push_back(toDisplayText(current->lines[i], kLineChars));
   }
   if (sendFailed_) lines.push_back("send failed, retry");
-  lines.push_back("A:OK  B:NG");
+  lines.push_back("A:OK  B:PC");
   draw(lines);
 }
 

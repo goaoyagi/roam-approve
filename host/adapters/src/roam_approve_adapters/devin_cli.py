@@ -118,12 +118,6 @@ class DevinCliAdapter(AgentAdapter):
     def render(self, result: Result) -> tuple[str, int]:
         if result == "approved":
             return json.dumps({"decision": "approve"}, separators=(",", ":")), 0
-        if result == "rejected":
-            return (
-                json.dumps(
-                    {"decision": "block", "reason": "Rejected on M5StickC"},
-                    separators=(",", ":"),
-                ),
-                0,
-            )
+        # "rejected" (M5 BtnB = "PC") hands the decision back to the normal
+        # Devin desktop prompt instead of blocking.
         return "", 0

@@ -1,6 +1,6 @@
 # roam-approve
 
-M5StickC PLUS SE を AI エージェントの human-in-the-loop 物理承認デバイスとして使うモノレポ。Devin CLI/Desktop の `PermissionRequest` hook → Bridge(FastAPI) → MQTT → M5StickC の経路で、エージェントの `exec` / `write` / `edit` を物理ボタン(BtnA=承認 / BtnB=却下)で承認する。
+M5StickC PLUS SE を AI エージェントの human-in-the-loop 物理承認デバイスとして使うモノレポ。Devin CLI/Desktop の `PermissionRequest` hook → Bridge(FastAPI) → MQTT → M5StickC の経路で、エージェントの `exec` / `write` / `edit` を物理ボタン(BtnA=承認 / BtnB=PC: Devin desktop の通常承認プロンプトへ差し戻し)で承認する。BtnB はブロック(拒否)ではない。
 
 ## アーキテクチャ
 
@@ -14,7 +14,7 @@ M5StickC PLUS SE を AI エージェントの human-in-the-loop 物理承認デ�
                                                                roam/approval/request  POST /v1/requests/{id}/decision
                                                                             ▼        │
                                                                       ┌─────────────────┐
-                                                                      │ M5StickC PLUS SE│  BtnA=Approve / BtnB=Reject
+                                                                      │ M5StickC PLUS SE│  BtnA=Approve / BtnB=PC
                                                                       └─────────────────┘
 ```
 
@@ -140,7 +140,7 @@ export DOCKER_HOST="unix://${HOME}/.colima/docker.sock"
 | ボタン | 位置 | 役割 |
 |---|---|---|
 | **BtnA** | 本体正面の大きいボタン(横向きだとだいたい右下) | 承認 |
-| **BtnB** | 側面の小さいボタン(画面上側・電源ボタンの隣) | 却下 |
+| **BtnB** | 側面の小さいボタン(画面上側・電源ボタンの隣) | PC(desktop の通常承認プロンプトへ差し戻し。ブロックはしない) |
 
 電源ボタンは使いません。
 
@@ -148,7 +148,7 @@ export DOCKER_HOST="unix://${HOME}/.colima/docker.sock"
 
 - 無操作約 **30 秒** でバックライトを落とす(`idleDimMs`)。あわせて CPU 80 MHz・Wi-Fi sleep を有効化
 - 通知(新規 pending)やボタン操作で復帰
-- **暗転中の 1 回目のボタンは復帰だけ**。承認/却下は明るい状態でもう 1 回押す
+- **暗転中の 1 回目のボタンは復帰だけ**。承認/PC は明るい状態でもう 1 回押す
 - バッテリー持続の長時間実測は未実施(用途・通知頻度依存)。待機中心なら暗転後の消費が支配的
 
 ## Using with Devin CLI/Desktop
@@ -199,7 +199,7 @@ hook は同期実行のため、待機中は通常の Permission プロンプト
 | Bridge の結果 | hook の stdout | Devin の動作 |
 |---|---|---|
 | approved | `{"decision":"approve"}` | 承認 |
-| rejected | `{"decision":"block","reason":"Rejected on M5StickC"}` | ブロック |
+| rejected(M5 の BtnB = PC) | (出力なし, exit 0) | 通常プロンプトへフォールバック(desktop で承認/拒否を選ぶ) |
 | expired / タイムアウト / Bridge エラー | (出力なし, exit 0) | 通常プロンプトへフォールバック |
 
 ## トラブルシュート

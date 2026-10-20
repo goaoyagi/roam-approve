@@ -186,9 +186,9 @@ def test_render_approved() -> None:
     assert code == 0
 
 
-def test_render_rejected() -> None:
+def test_render_rejected_falls_back_to_prompt() -> None:
     out, code = DevinCliAdapter().render("rejected")
-    assert out == '{"decision":"block","reason":"Rejected on M5StickC"}'
+    assert out == ""
     assert code == 0
 
 
