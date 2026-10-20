@@ -260,17 +260,21 @@ void test_button_a_posts_approve_with_device_credentials() {
       "{\"decision\":\"approve\",\"source\":\"m5stickc\"}",
       fixture.http.lastPostBody.c_str());
   TEST_ASSERT_EQUAL(ApprovalApp::State::Done, fixture.app.state());
+  TEST_ASSERT_TRUE(fixture.display.lastDrawHasText("Approved"));
 }
 
 void test_button_b_posts_reject() {
   Fixture fixture;
   fixture.start();
+  TEST_ASSERT_TRUE(fixture.display.lastDrawHasText("A:OK  B:PC"));
   fixture.waitInputGuard();
   fixture.buttons.pressedB = true;
   fixture.app.tick();
   TEST_ASSERT_EQUAL(1, fixture.http.postCalls);
   TEST_ASSERT_EQUAL_STRING("{\"decision\":\"reject\",\"source\":\"m5stickc\"}",
                            fixture.http.lastPostBody.c_str());
+  TEST_ASSERT_EQUAL(ApprovalApp::State::Done, fixture.app.state());
+  TEST_ASSERT_TRUE(fixture.display.lastDrawHasText("Sent to PC"));
 }
 
 void test_resolved_signal_refreshes_and_clears_gone_request() {

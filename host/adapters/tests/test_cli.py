@@ -124,14 +124,13 @@ def test_approve(monkeypatch, capsys, bridge, stdin_event) -> None:
     assert body["timeout_s"] == 5
 
 
-def test_reject(monkeypatch, capsys, bridge, stdin_event) -> None:
+def test_reject_falls_back_to_prompt(
+    monkeypatch, capsys, bridge, stdin_event
+) -> None:
     bridge.wait_status = "rejected"
     code, captured = run_hook(monkeypatch, capsys, bridge)
     assert code == 0
-    assert (
-        captured.out.strip()
-        == '{"decision":"block","reason":"Rejected on M5StickC"}'
-    )
+    assert captured.out == ""
 
 
 def test_pending_timeout(monkeypatch, capsys, bridge, stdin_event) -> None:

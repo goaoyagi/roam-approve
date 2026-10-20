@@ -2,7 +2,7 @@
 
 ## Overview
 
-roam-approve は、M5StickC PLUS SE を AI エージェントの human-in-the-loop 物理承認デバイスとして使うためのモノレポです。Devin CLI/Desktop の `PermissionRequest` hook → Bridge(FastAPI, Bearer トークン認証) → MQTT → M5StickC PLUS SE の経路で、エージェントの操作を物理ボタンで承認/却下します。新しいエージェントの追加は `host/adapters` 内の 1 モジュールで完結します。
+roam-approve は、M5StickC PLUS SE を AI エージェントの human-in-the-loop 物理承認デバイスとして使うためのモノレポです。Devin CLI/Desktop の `PermissionRequest` hook → Bridge(FastAPI, Bearer トークン認証) → MQTT → M5StickC PLUS SE の経路で、エージェントの操作を物理ボタンで承認するか、PC(Devin desktop の通常承認プロンプト)へ差し戻します。新しいエージェントの追加は `host/adapters` 内の 1 モジュールで完結します。
 
 ```
 ┌──────────────┐  stdin(JSON)   ┌──────────────────┐  POST /v1/requests   ┌─────────────┐
@@ -14,7 +14,7 @@ roam-approve は、M5StickC PLUS SE を AI エージェントの human-in-the-lo
                                                                roam/approval/request  POST /v1/requests/{id}/decision
                                                                             ▼        │
                                                                       ┌─────────────────┐
-                                                                      │ M5StickC PLUS SE│  BtnA=Approve / BtnB=Reject
+                                                                      │ M5StickC PLUS SE│  BtnA=Approve / BtnB=PC
                                                                       └─────────────────┘
 ```
 
@@ -96,7 +96,7 @@ roam-approve/
 
 - parse: `tool_name` → title、`tool_input.command` / `file_path` → 画面幅(≒20 文字 × 6 行)に要約
 - デバイスのフォントは ASCII のみのため、parse で NFC 正規化後に連続した非 ASCII 部分を 1 つの目印に縮める: すべて日本語なら `<JA:n>`、それ以外(絵文字・全角英数などの紛らわしい文字を含む)は `<?:n>`(n はコードポイント数)。目印は行をまたいで分割しない。翻訳はしない(承認対象をそのまま見せるため)
-- render: approved → `{"decision":"approve"}`、rejected → `{"decision":"block","reason":"Rejected on M5StickC"}`、expired / Bridge 不達 → **何も出力せず exit 0**(通常プロンプトへフォールバック、安全側)
+- render: approved → `{"decision":"approve"}`、rejected / expired / Bridge 不達 → **何も出力せず exit 0**(通常プロンプトへフォールバック、安全側)。M5 の BtnB(画面表示 `B:PC`)は Bridge には `reject` を送るが、hook は block せず desktop の通常承認プロンプトへ差し戻す(M5 側では拒否できない)
 - トークンと Bridge URL は環境変数 `ROAM_BRIDGE_URL` / `ROAM_AGENT_TOKEN`(hook は親プロセスの env を継承)
 
 ## Design rules
